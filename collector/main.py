@@ -44,6 +44,8 @@ def run():
 
     # Étape 1 : collecte brute depuis toutes les sources
     all_raw = []
+    seen_urls = set()  # déduplication en mémoire + DB
+
     for doc in sources:
         source = doc.to_dict()
         source["id"] = doc.id
@@ -60,9 +62,11 @@ def run():
             for raw in raw_articles:
                 if len(all_raw) >= MAX_ARTICLES_PER_RUN:
                     break
-                if already_exists(raw["article_url"]):
+                url = raw["article_url"]
+                if url in seen_urls or already_exists(url):
                     logger.info(f"  Déjà collecté, ignoré : {raw['title'][:60]}")
                     continue
+                seen_urls.add(url)
                 all_raw.append(raw)
                 logger.info(f"  Nouveau : {raw['title'][:60]}")
 

@@ -3,6 +3,17 @@ import { useState } from "react";
 import useSWR, { mutate } from "swr";
 import { api } from "@/lib/api";
 
+const API = process.env.NEXT_PUBLIC_API_URL;
+
+async function toggleSource(token: string, id: string) {
+  const res = await fetch(`${API}/sources/${id}/toggle`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("Toggle failed");
+  return res.json();
+}
+
 export default function SourceManager({ token }: { token: string }) {
   const { data: sources, isLoading } = useSWR("sources", () => api.sources.list(token));
   const [form, setForm] = useState({ name: "", type: "web", url: "", gmail_sender: "" });
@@ -19,6 +30,11 @@ export default function SourceManager({ token }: { token: string }) {
     setForm({ name: "", type: "web", url: "", gmail_sender: "" });
     mutate("sources");
     setSubmitting(false);
+  };
+
+  const handleToggle = async (id: string) => {
+    await toggleSource(token, id);
+    mutate("sources");
   };
 
   const handleDelete = async (id: string) => {
@@ -77,19 +93,30 @@ export default function SourceManager({ token }: { token: string }) {
         <h3 className="font-semibold text-lg">Sources configurées</h3>
         {isLoading && <p className="text-gray-500 text-sm">Chargement...</p>}
         {sources?.map((s: any) => (
-          <div key={s.id} className="bg-white border rounded-lg px-5 py-3 flex items-center justify-between">
-            <div>
-              <span className="font-medium">{s.name}</span>
-              <span className="ml-2 text-xs text-gray-400">
-                {s.type === "web" ? s.url : s.gmail_sender}
-              </span>
+          <div key={s.id} className={`bg-white border rounded-lg px-5 py-3 flex items-center justify-between gap-4 transition ${!s.active ? "opacity-50" : ""}`}>
+            <div className="flex items-center gap-3 min-w-0">
+              <span className={`w-2 h-2 rounded-full shrink-0 ${s.active ? "bg-green-500" : "bg-gray-300"}`} />
+              <div className="min-w-0">
+                <span className="font-medium text-sm">{s.name}</span>
+                <span className="ml-2 text-xs text-gray-400 truncate">
+                  {s.type === "web" ? s.url : s.gmail_sender}
+                </span>
+              </div>
             </div>
-            <button
-              onClick={() => handleDelete(s.id)}
-              className="text-red-500 text-sm hover:underline"
-            >
-              Supprimer
-            </button>
+            <div className="flex items-center gap-3 shrink-0">
+              <button
+                onClick={() => handleToggle(s.id)}
+                className={`text-xs px-2 py-1 rounded border transition ${s.active ? "border-gray-300 text-gray-600 hover:border-gray-500" : "border-blue-300 text-blue-600 hover:border-blue-500"}`}
+              >
+                {s.active ? "Désactiver" : "Activer"}
+              </button>
+              <button
+                onClick={() => handleDelete(s.id)}
+                className="text-red-500 text-sm hover:underline"
+              >
+                Supprimer
+              </button>
+            </div>
           </div>
         ))}
       </div>

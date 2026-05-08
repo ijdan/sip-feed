@@ -1,6 +1,6 @@
 import os
 import uuid
-import time
+import json
 from datetime import datetime
 import google.generativeai as genai
 
@@ -9,52 +9,125 @@ model = genai.GenerativeModel("gemini-2.5-flash")
 
 CATEGORIES = ["IA", "DevOps", "Cloud", "Sécurité", "Dev", "IT", "Autre"]
 
-PROMPT_TEMPLATE = """
+BATCH_PROMPT_FR = """
+Tu es rédacteur en chef d'un média tech francophone de référence.
+Tu vas traiter {count} articles en une seule passe.
+
+Pour chaque article, produis une fiche de veille en français, rédigée avec le style
+concis et précis d'un journaliste tech, à destination de professionnels (développeurs,
+architectes, DSI).
+
+Règles de rédaction :
+- Traduis et reformule le titre pour qu'il soit percutant en français
+- Écris tous les textes en français, même si la source est en anglais
+- Sois factuel et précis : cite les technologies, versions, noms d'entreprises, chiffres clés
+- Ajoute du contexte pertinent si tu le connais (positionnement concurrentiel, impact secteur,
+  tendance de fond) — uniquement si c'est fiable et utile
+- Style : phrases courtes, actives, ton professionnel sans jargon inutile
+- N'invente aucun fait non présent dans la source ou dans tes connaissances avérées
+
+Articles à traiter :
+{articles}
+
+Réponds UNIQUEMENT avec un tableau JSON valide de {count} objets, dans le même ordre que les articles :
+[
+  {{
+    "title": "titre reformulé en français, percutant (max 90 caractères)",
+    "short_description": "accroche journalistique en 2 phrases maximum, donne envie de lire",
+    "long_description": "analyse complète en 5 à 8 phrases : faits, contexte, enjeux, impact potentiel",
+    "category": "une valeur parmi {categories}"
+  }}
+]
+"""
+
+BATCH_PROMPT_NO_TRANSLATION = """
 Tu es un assistant spécialisé en veille technologique.
+Tu vas traiter {count} articles en une seule passe.
 
-Voici le contenu brut d'un article tech :
----
-Titre : {title}
-Contenu : {content}
----
+Pour chaque article, produis un résumé structuré dans la langue de la source.
 
-Réponds en JSON strict avec ces champs :
-{{
-  "short_description": "résumé en 2 phrases maximum",
-  "long_description": "résumé détaillé en 5 à 8 phrases",
-  "category": "une valeur parmi {categories}"
-}}
+Règles :
+- Conserve la langue originale de l'article
+- Sois factuel : cite technologies, versions, entreprises, chiffres clés
+- Style : concis, professionnel
+- N'invente aucun fait
+
+Articles à traiter :
+{articles}
+
+Réponds UNIQUEMENT avec un tableau JSON valide de {count} objets :
+[
+  {{
+    "title": "titre original ou légèrement reformulé (max 90 caractères)",
+    "short_description": "résumé en 2 phrases maximum",
+    "long_description": "résumé détaillé en 5 à 8 phrases",
+    "category": "une valeur parmi {categories}"
+  }}
+]
 """
 
 
-def enrich_article(raw: dict, source: dict) -> dict:
-    prompt = PROMPT_TEMPLATE.format(
-        title=raw["title"],
-        content=raw.get("raw_content", "")[:2000],
+def enrich_articles_batch(raw_articles: list[dict], translate: bool = True) -> list[dict]:
+    """Traite tous les articles en un seul appel Gemini."""
+    articles_text = ""
+    for i, raw in enumerate(raw_articles):
+        articles_text += (
+            f"--- Article {i + 1} ---\n"
+            f"Titre original : {raw['title']}\n"
+            f"Contenu : {raw.get('raw_content', '')[:1500]}\n\n"
+        )
+
+    template = BATCH_PROMPT_FR if translate else BATCH_PROMPT_NO_TRANSLATION
+    prompt = template.format(
+        count=len(raw_articles),
+        articles=articles_text,
         categories=", ".join(CATEGORIES),
     )
 
-    time.sleep(4)  # respect du quota free tier (15 rpm max)
     response = model.generate_content(prompt)
     text = response.text.strip()
 
-    import json
     if text.startswith("```"):
         text = text.split("```")[1]
         if text.startswith("json"):
             text = text[4:]
+    text = text.strip()
 
-    enriched = json.loads(text)
+    enriched_list = json.loads(text)
 
-    return {
-        "id": str(uuid.uuid4()),
-        "title": raw["title"],
-        "short_description": enriched["short_description"],
-        "long_description": enriched["long_description"],
-        "article_url": raw["article_url"],
-        "source_name": raw["source_name"],
-        "source_id": raw["source_id"],
-        "category": enriched.get("category", "Autre"),
-        "published_at": raw.get("published_at", datetime.utcnow().isoformat()),
-        "collected_at": datetime.utcnow().isoformat(),
-    }
+    results = []
+    for i, raw in enumerate(raw_articles):
+        enriched = enriched_list[i] if i < len(enriched_list) else {}
+        results.append({
+            "id": str(uuid.uuid4()),
+            "title": enriched.get("title", raw["title"]),
+            "short_description": enriched.get("short_description", ""),
+            "long_description": enriched.get("long_description", ""),
+            "article_url": raw["article_url"],
+            "source_name": raw["source_name"],
+            "source_id": raw["source_id"],
+            "category": enriched.get("category", "Autre"),
+            "published_at": raw.get("published_at", datetime.utcnow().isoformat()),
+            "collected_at": datetime.utcnow().isoformat(),
+        })
+
+    return results
+
+
+def save_raw_articles(raw_articles: list[dict]) -> list[dict]:
+    """Sauvegarde les articles sans traitement LLM."""
+    return [
+        {
+            "id": str(uuid.uuid4()),
+            "title": raw["title"],
+            "short_description": raw.get("raw_content", "")[:200],
+            "long_description": raw.get("raw_content", "")[:1000],
+            "article_url": raw["article_url"],
+            "source_name": raw["source_name"],
+            "source_id": raw["source_id"],
+            "category": "Autre",
+            "published_at": raw.get("published_at", datetime.utcnow().isoformat()),
+            "collected_at": datetime.utcnow().isoformat(),
+        }
+        for raw in raw_articles
+    ]

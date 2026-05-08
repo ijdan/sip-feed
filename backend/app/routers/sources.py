@@ -46,6 +46,18 @@ def update_source(source_id: str, payload: SourceCreate, current_user: dict = De
     return Source(**{**doc, "id": source_id})
 
 
+@router.patch("/{source_id}/toggle", response_model=Source)
+def toggle_source(source_id: str, current_user: dict = Depends(require_admin)):
+    db = get_db()
+    ref = db.collection("sources").document(source_id)
+    doc = ref.get()
+    if not doc.exists:
+        raise HTTPException(status_code=404, detail="Source introuvable")
+    current_active = doc.to_dict().get("active", True)
+    ref.update({"active": not current_active})
+    return Source(**{**doc.to_dict(), "id": source_id, "active": not current_active})
+
+
 @router.delete("/{source_id}", status_code=204)
 def delete_source(source_id: str, current_user: dict = Depends(require_admin)):
     db = get_db()

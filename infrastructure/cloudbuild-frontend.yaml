@@ -1,0 +1,12 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '--build-arg'
+      - 'NEXT_PUBLIC_API_URL=https://backend-159654598910.europe-west1.run.app'
+      - '-t'
+      - 'europe-west1-docker.pkg.dev/tech-news-aggregator-001/tech-news-repo/frontend:latest'
+      - './frontend'
+
+images:
+  - 'europe-west1-docker.pkg.dev/tech-news-aggregator-001/tech-news-repo/frontend:latest'

@@ -1,0 +1,10 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'europe-west1-docker.pkg.dev/tech-news-aggregator-001/tech-news-repo/collector:latest'
+      - './collector'
+
+images:
+  - 'europe-west1-docker.pkg.dev/tech-news-aggregator-001/tech-news-repo/collector:latest'

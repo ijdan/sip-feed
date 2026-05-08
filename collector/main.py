@@ -37,7 +37,9 @@ def run():
     translation_enabled = global_settings.get("translation_enabled", True) and llm_enabled
     logger.info(f"Settings — LLM: {llm_enabled}, Traduction FR: {translation_enabled}")
 
-    sources = [doc for doc in db.collection("sources").where("active", "==", True).stream()]
+    all_sources = [doc for doc in db.collection("sources").where("active", "==", True).stream()]
+    # Gmail en premier pour que les newsletters aient la priorité sur l'attribution
+    sources = sorted(all_sources, key=lambda d: 0 if d.to_dict().get("type") == "gmail" else 1)
     logger.info(f"{len(sources)} source(s) active(s) trouvée(s)")
 
     # Étape 1 : collecte brute depuis toutes les sources

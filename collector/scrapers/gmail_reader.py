@@ -9,7 +9,14 @@ from googleapiclient.discovery import build
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 
 # Mots-clés à exclure pour filtrer les liens parasites (désabo, pub)
-EXCLUDED_URL_PATTERNS = ["unsubscribe", "optout", "mailto:", "click.", "track.", "utm_"]
+EXCLUDED_URL_PATTERNS = [
+    "unsubscribe", "optout", "mailto:", "click.", "track.", "utm_",
+    "refer.", "referral", "linkedin.com/jobs", "jobs.", "/careers",
+    "advertise", "sponsor", "feedback", "survey", "manage-preferences",
+    "view-online", "view_online", "tldr.tech", "tldrnewsletter.com/",
+]
+
+MIN_TITLE_LENGTH = 20  # ignore les textes trop courts ("Apply here", "View Online"...)
 
 
 def _get_gmail_service():
@@ -43,7 +50,7 @@ def _extract_article_links(html: str) -> list[dict]:
         href = a["href"]
         text = a.get_text(strip=True)
 
-        if not text or len(text) < 10:
+        if not text or len(text) < MIN_TITLE_LENGTH:
             continue
         if any(p in href.lower() for p in EXCLUDED_URL_PATTERNS):
             continue
@@ -64,7 +71,7 @@ def read_gmail_source(source: dict) -> list[dict]:
     results = service.users().messages().list(
         userId="me",
         q=f"from:{sender} newer_than:1d",
-        maxResults=5,
+        maxResults=10,
     ).execute()
 
     messages = results.get("messages", [])

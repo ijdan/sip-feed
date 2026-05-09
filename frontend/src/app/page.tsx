@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import useSWR from "swr";
 import NewsCard from "@/components/NewsCard";
 import CategoryFilter from "@/components/CategoryFilter";
+import SourceFilter from "@/components/SourceFilter";
 import { CATEGORIES } from "@/lib/categories";
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
@@ -16,12 +17,15 @@ export default function FeedPage() {
   const [category, setCategory] = useState<string | null>(null);
   const [columns, setColumns] = useState<number>(1);
   const [lang, setLang] = useState<"fr" | "en">("fr");
+  const [excludedSources, setExcludedSources] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     const savedCols = localStorage.getItem("feed-columns");
     if (savedCols) setColumns(Number(savedCols));
     const savedLang = localStorage.getItem("feed-lang");
     if (savedLang === "en" || savedLang === "fr") setLang(savedLang);
+    const savedExcluded = localStorage.getItem("feed-excluded-sources");
+    if (savedExcluded) setExcludedSources(new Set(JSON.parse(savedExcluded)));
   }, []);
 
   const changeColumns = (n: number) => {
@@ -34,17 +38,42 @@ export default function FeedPage() {
     localStorage.setItem("feed-lang", l);
   };
 
+  const toggleSource = (source: string) => {
+    const next = new Set(excludedSources);
+    if (next.has(source)) next.delete(source);
+    else next.add(source);
+    setExcludedSources(next);
+    localStorage.setItem("feed-excluded-sources", JSON.stringify([...next]));
+  };
+
   const articlesUrl = `${process.env.NEXT_PUBLIC_API_URL}/articles/${category ? "?category=" + category : ""}`;
   const statsUrl = `${process.env.NEXT_PUBLIC_API_URL}/articles/stats`;
 
   const { data, isLoading } = useSWR(articlesUrl, fetcher);
   const { data: stats } = useSWR(statsUrl, fetcher);
 
+  // Sources uniques présentes dans les articles
+  const availableSources: string[] = data?.items
+    ? [...new Set<string>(data.items.map((a: any) => a.source_name))].sort()
+    : [];
+
+  // Articles filtrés (exclusion des sources désactivées)
+  const filteredItems = (data?.items ?? []).filter(
+    (a: any) => !excludedSources.has(a.source_name)
+  );
+
+  // Compteurs recalculés sur les articles visibles
+  const filteredTotal = filteredItems.length;
+  const filteredByCategory = filteredItems.reduce((acc: Record<string, number>, a: any) => {
+    acc[a.category] = (acc[a.category] ?? 0) + 1;
+    return acc;
+  }, {});
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-4 flex-wrap">
-        <p className="text-sm text-gray-500">
-          {stats ? `${stats.total} article${stats.total > 1 ? "s" : ""}` : ""}
+        <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+          {data ? `${filteredTotal} article${filteredTotal > 1 ? "s" : ""}${excludedSources.size > 0 ? ` (${excludedSources.size} source${excludedSources.size > 1 ? "s" : ""} masquée${excludedSources.size > 1 ? "s" : ""})` : ""}` : ""}
         </p>
         <div className="flex items-center gap-2">
           {/* Sélecteur de langue */}
@@ -83,21 +112,27 @@ export default function FeedPage() {
         </div>
       </div>
 
+      <SourceFilter
+        sources={availableSources}
+        excluded={excludedSources}
+        onToggle={toggleSource}
+      />
+
       <CategoryFilter
         categories={CATEGORIES}
         selected={category}
         onChange={setCategory}
-        counts={stats?.by_category ?? {}}
+        counts={filteredByCategory}
         lang={lang}
       />
 
       {isLoading && <p className="text-gray-500">Chargement...</p>}
-      {!isLoading && data?.items?.length === 0 && (
-        <p className="text-gray-400 text-sm">Aucun article dans cette catégorie.</p>
+      {!isLoading && filteredItems.length === 0 && (
+        <p className="text-gray-400 text-sm">Aucun article — toutes les sources sont masquées ou aucun article dans cette catégorie.</p>
       )}
 
       <div className={`grid gap-4 ${COLUMN_CLASSES[columns]}`}>
-        {data?.items?.map((article: any) => (
+        {filteredItems.map((article: any) => (
           <NewsCard key={article.id} article={article} lang={lang} />
         ))}
       </div>

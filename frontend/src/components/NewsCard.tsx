@@ -33,12 +33,16 @@ export default function NewsCard({ article, lang = "fr" }: Props) {
     : (article.long_description_fr || article.long_description);
 
   return (
-    <div className="bg-white rounded-lg border p-5 shadow-sm space-y-3">
+    <div
+      style={{ backgroundColor: "var(--surface)", borderColor: "var(--border)" }}
+      className="rounded-lg border p-5 shadow-sm space-y-3 transition-colors"
+    >
       <div
         className="flex items-start justify-between gap-4 cursor-pointer"
         onClick={() => setExpanded(!expanded)}
       >
-        <h2 className="text-lg font-semibold leading-snug hover:text-blue-700 transition-colors">
+        <h2 className="text-lg font-semibold leading-snug transition-colors"
+          style={{ color: "var(--text)" }}>
           {title}
         </h2>
         <span className={`shrink-0 text-xs font-medium px-2 py-1 rounded-full ${color}`}>
@@ -47,17 +51,22 @@ export default function NewsCard({ article, lang = "fr" }: Props) {
       </div>
 
       <p
-        className="text-gray-600 text-sm cursor-pointer hover:text-gray-800 transition-colors"
+        className="text-sm cursor-pointer transition-colors"
+        style={{ color: "var(--text-muted)" }}
         onClick={() => setExpanded(!expanded)}
       >
         {shortDesc}
       </p>
 
       {expanded && longDesc && (
-        <p className="text-gray-700 text-sm border-t pt-3">{longDesc}</p>
+        <p className="text-sm pt-3 border-t"
+          style={{ color: "var(--text)", borderColor: "var(--border)" }}>
+          {longDesc}
+        </p>
       )}
 
-      <div className="flex items-center justify-between text-xs text-gray-400 pt-1">
+      <div className="flex items-center justify-between text-xs pt-1"
+        style={{ color: "var(--text-muted)" }}>
         <div className="flex gap-3">
           <span>{article.source_name}</span>
           <span>·</span>
@@ -67,7 +76,8 @@ export default function NewsCard({ article, lang = "fr" }: Props) {
           href={article.article_url}
           target="_blank"
           rel="noopener noreferrer"
-          className="text-blue-600 font-medium hover:underline"
+          className="font-medium hover:underline"
+          style={{ color: "var(--accent)" }}
         >
           {lang === "en" ? "Read article →" : "Lire l'article →"}
         </a>

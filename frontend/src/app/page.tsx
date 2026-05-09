@@ -48,29 +48,33 @@ export default function FeedPage() {
         </p>
         <div className="flex items-center gap-2">
           {/* Sélecteur de langue */}
-          <div className="flex border rounded-md overflow-hidden">
+          <div className="flex border rounded-md overflow-hidden" style={{ borderColor: "var(--border)" }}>
             {(["fr", "en"] as const).map((l) => (
               <button
                 key={l}
                 onClick={() => changeLang(l)}
-                className={`px-3 py-1 text-sm font-medium transition ${
-                  lang === l ? "bg-gray-900 text-white" : "bg-white text-gray-500 hover:bg-gray-100"
-                }`}
+                className="px-3 py-1 text-sm font-medium transition"
+                style={lang === l
+                  ? { backgroundColor: "var(--text)", color: "var(--bg)" }
+                  : { backgroundColor: "var(--surface)", color: "var(--text-muted)" }
+                }
               >
                 {l.toUpperCase()}
               </button>
             ))}
           </div>
           {/* Sélecteur de colonnes */}
-          <div className="flex border rounded-md overflow-hidden">
+          <div className="flex border rounded-md overflow-hidden" style={{ borderColor: "var(--border)" }}>
             {[1, 2, 3].map((n) => (
               <button
                 key={n}
                 onClick={() => changeColumns(n)}
                 title={`${n} colonne${n > 1 ? "s" : ""}`}
-                className={`px-3 py-1 text-sm transition ${
-                  columns === n ? "bg-gray-900 text-white" : "bg-white text-gray-500 hover:bg-gray-100"
-                }`}
+                className="px-3 py-1 text-sm transition"
+                style={columns === n
+                  ? { backgroundColor: "var(--text)", color: "var(--bg)" }
+                  : { backgroundColor: "var(--surface)", color: "var(--text-muted)" }
+                }
               >
                 {n === 1 ? "▬" : n === 2 ? "⊟" : "⊞"}
               </button>

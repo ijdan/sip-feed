@@ -1,3 +1,62 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Mode clair — fond chaud ivoire, texte charbon doux */
+:root {
+  --bg:          #f5f0e8;
+  --surface:     #ffffff;
+  --surface-2:   #f0ebe3;
+  --border:      #e5ddd3;
+  --text:        #2c2c2c;
+  --text-muted:  #6b6864;
+  --accent:      #1a1a2e;
+}
+
+/* Mode sombre — fond ardoise nuit, texte ivoire doux */
+.dark {
+  --bg:          #16171c;
+  --surface:     #1e2028;
+  --surface-2:   #252836;
+  --border:      #2e3040;
+  --text:        #e8e4dd;
+  --text-muted:  #9a9698;
+  --accent:      #a0aaff;
+}
+
+body {
+  background-color: var(--bg);
+  color: var(--text);
+  font-size: var(--font-size, 16px);
+  transition: background-color 0.2s, color 0.2s;
+}
+
+/* Tailles de police — appliquées sur <html> pour que les rem Tailwind scalent */
+html                { font-size: 16px; }
+html.font-size-sm   { font-size: 13px; }
+html.font-size-md   { font-size: 16px; }
+html.font-size-lg   { font-size: 20px; }
+
+/* Dark mode — overrides globaux pour admin et composants non migrés */
+.dark .bg-white        { background-color: var(--surface) !important; }
+.dark .bg-gray-50      { background-color: var(--bg) !important; }
+.dark .bg-gray-100     { background-color: var(--surface-2) !important; }
+.dark .border-gray-200,
+.dark .border-gray-300 { border-color: var(--border) !important; }
+.dark .text-gray-900   { color: var(--text) !important; }
+.dark .text-gray-700,
+.dark .text-gray-800   { color: var(--text) !important; }
+.dark .text-gray-400,
+.dark .text-gray-500,
+.dark .text-gray-600   { color: var(--text-muted) !important; }
+.dark .hover\:bg-gray-50:hover,
+.dark .hover\:bg-gray-100:hover { background-color: var(--surface-2) !important; }
+.dark input,
+.dark select,
+.dark textarea {
+  background-color: var(--surface-2);
+  color: var(--text);
+  border-color: var(--border);
+}
+.dark input::placeholder,
+.dark textarea::placeholder { color: var(--text-muted); }

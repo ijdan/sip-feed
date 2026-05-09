@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import SessionProvider from "@/components/SessionProvider";
 import UserMenu from "@/components/UserMenu";
+import Controls from "@/components/Controls";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -13,16 +14,18 @@ export const metadata: Metadata = {
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const session = await getServerSession(authOptions);
   return (
-    <html lang="fr">
-      <body className="bg-gray-50 text-gray-900">
+    <html lang="fr" suppressHydrationWarning>
+      <body style={{ backgroundColor: "var(--bg)", color: "var(--text)" }}>
         <SessionProvider session={session}>
-          <header className="border-b bg-white px-6 py-4 flex items-center justify-between">
+          <header style={{ backgroundColor: "var(--surface)", borderColor: "var(--border)" }}
+            className="border-b px-6 py-4 flex items-center justify-between">
             <h1 className="text-xl font-bold">Tech News</h1>
-            <div className="flex items-center gap-6">
-              <nav className="flex gap-4 text-sm">
+            <div className="flex items-center gap-4">
+              <nav className="flex gap-4 text-sm" style={{ color: "var(--text-muted)" }}>
                 <a href="/" className="hover:underline">Feed</a>
                 <a href="/admin" className="hover:underline">Admin</a>
               </nav>
+              <Controls />
               <UserMenu />
             </div>
           </header>

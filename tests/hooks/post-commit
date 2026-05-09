@@ -1,0 +1,33 @@
+#!/bin/bash
+# Hook post-commit — lance le sous-agent de tests fonctionnels
+
+ROOT="$(git rev-parse --show-toplevel)"
+PROMPT_FILE="$ROOT/tests/functional-test-prompt.md"
+
+echo ""
+echo "╔══════════════════════════════════════════╗"
+echo "║  🤖 Sous-agent de tests fonctionnels     ║"
+echo "╚══════════════════════════════════════════╝"
+echo ""
+
+# Vérifie que claude CLI est disponible
+if ! command -v claude &>/dev/null; then
+  echo "⚠️  claude CLI non trouvé — tests ignorés."
+  echo "   Installe Claude Code pour activer les tests automatiques."
+  exit 0
+fi
+
+# Vérifie que le prompt existe
+if [ ! -f "$PROMPT_FILE" ]; then
+  echo "⚠️  Fichier de prompt introuvable : $PROMPT_FILE"
+  exit 0
+fi
+
+# Lance le sous-agent en mode non-interactif
+echo "Analyse du commit en cours..."
+echo ""
+
+claude --print "$(cat "$PROMPT_FILE")"
+
+echo ""
+echo "════════════════════════════════════════════"

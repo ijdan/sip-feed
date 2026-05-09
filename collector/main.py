@@ -14,16 +14,25 @@ from processors.gemini_processor import enrich_articles_batch, save_raw_articles
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-db = firestore.Client()
+db = firestore.Client(project=os.environ.get("FIRESTORE_PROJECT_ID", "tech-news-aggregator-001"))
 
 MAX_ARTICLES_PER_RUN = 20
 
 
+DEFAULT_MODEL_PRIORITY = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+
 def get_global_settings() -> dict:
     doc = db.collection("settings").document("global").get()
-    if doc.exists:
-        return doc.to_dict()
-    return {"llm_enabled": True, "translation_enabled": True}
+    data = doc.to_dict() if doc.exists else {}
+    # Filtre les modèles inconnus et ajoute les nouveaux
+    stored = [m for m in data.get("model_priority", []) if m in DEFAULT_MODEL_PRIORITY]
+    for model in reversed(DEFAULT_MODEL_PRIORITY):
+        if model not in stored:
+            stored.insert(0, model)
+    data["model_priority"] = stored
+    data.setdefault("llm_enabled", True)
+    data.setdefault("translation_enabled", True)
+    return data
 
 
 def already_exists(url: str) -> bool:
@@ -35,12 +44,17 @@ def run():
     global_settings = get_global_settings()
     llm_enabled = global_settings.get("llm_enabled", True)
     translation_enabled = global_settings.get("translation_enabled", True) and llm_enabled
-    logger.info(f"Settings — LLM: {llm_enabled}, Traduction FR: {translation_enabled}")
+    model_priority = global_settings.get("model_priority", DEFAULT_MODEL_PRIORITY)
+    logger.info(f"Settings — LLM: {llm_enabled}, Traduction FR: {translation_enabled}, Modèles: {model_priority}")
 
     all_sources = [doc for doc in db.collection("sources").where("active", "==", True).stream()]
     # Gmail en premier pour que les newsletters aient la priorité sur l'attribution
     sources = sorted(all_sources, key=lambda d: 0 if d.to_dict().get("type") == "gmail" else 1)
-    logger.info(f"{len(sources)} source(s) active(s) trouvée(s)")
+    logger.info(f"{len(sources)} source(s) active(s) :")
+    for doc in sources:
+        s = doc.to_dict()
+        detail = s.get("url") or s.get("gmail_sender", "")
+        logger.info(f"  [{s['type'].upper()}] {s['name']} — {detail}")
 
     # Étape 1 : collecte brute depuis toutes les sources
     all_raw = []
@@ -81,10 +95,10 @@ def run():
     if llm_enabled:
         logger.info(f"Envoi de {len(all_raw)} article(s) à Gemini (traduction FR: {translation_enabled})...")
         try:
-            enriched_articles = enrich_articles_batch(all_raw, translate=translation_enabled)
+            enriched_articles = enrich_articles_batch(all_raw, translate=translation_enabled, model_priority=model_priority)
         except Exception as e:
-            logger.error(f"Erreur Gemini : {e}")
-            return
+            logger.error(f"Tous les modèles LLM ont échoué ({e.__class__.__name__}) — sauvegarde des articles bruts sans enrichissement.")
+            enriched_articles = save_raw_articles(all_raw)
     else:
         logger.info("LLM désactivé — sauvegarde des articles bruts.")
         enriched_articles = save_raw_articles(all_raw)

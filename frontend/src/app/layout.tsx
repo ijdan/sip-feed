@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import SessionProvider from "@/components/SessionProvider";
+import UserMenu from "@/components/UserMenu";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -17,10 +18,13 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <SessionProvider session={session}>
           <header className="border-b bg-white px-6 py-4 flex items-center justify-between">
             <h1 className="text-xl font-bold">Tech News</h1>
-            <nav className="flex gap-4 text-sm">
-              <a href="/" className="hover:underline">Feed</a>
-              <a href="/admin" className="hover:underline">Admin</a>
-            </nav>
+            <div className="flex items-center gap-6">
+              <nav className="flex gap-4 text-sm">
+                <a href="/" className="hover:underline">Feed</a>
+                <a href="/admin" className="hover:underline">Admin</a>
+              </nav>
+              <UserMenu />
+            </div>
           </header>
           <main className="max-w-4xl mx-auto px-4 py-8">{children}</main>
         </SessionProvider>

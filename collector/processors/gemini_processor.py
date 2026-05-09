@@ -5,7 +5,12 @@ from datetime import datetime
 import google.generativeai as genai
 
 genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-model = genai.GenerativeModel("gemini-2.5-flash")
+
+DEFAULT_MODEL_PRIORITY = [
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-1.5-flash",
+]
 
 CATEGORIES = ["IA", "DevOps", "Cloud", "Sécurité", "Dev", "IT", "Autre"]
 
@@ -67,8 +72,8 @@ Réponds UNIQUEMENT avec un tableau JSON valide de {count} objets :
 """
 
 
-def enrich_articles_batch(raw_articles: list[dict], translate: bool = True) -> list[dict]:
-    """Traite tous les articles en un seul appel Gemini."""
+def enrich_articles_batch(raw_articles: list[dict], translate: bool = True, model_priority: list[str] | None = None) -> list[dict]:
+    """Traite tous les articles en un seul appel Gemini, avec fallback sur les modèles suivants."""
     articles_text = ""
     for i, raw in enumerate(raw_articles):
         articles_text += (
@@ -84,8 +89,25 @@ def enrich_articles_batch(raw_articles: list[dict], translate: bool = True) -> l
         categories=", ".join(CATEGORIES),
     )
 
-    response = model.generate_content(prompt)
-    text = response.text.strip()
+    models_to_try = model_priority or DEFAULT_MODEL_PRIORITY
+    last_error = None
+    text = None
+
+    for model_name in models_to_try:
+        try:
+            import logging
+            logging.getLogger(__name__).debug(f"Essai modèle : {model_name}")
+            m = genai.GenerativeModel(model_name)
+            response = m.generate_content(prompt)
+            text = response.text.strip()
+            logging.getLogger(__name__).info(f"Modèle utilisé avec succès : {model_name}")
+            break
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"Modèle {model_name} indisponible : {e.__class__.__name__} — {e}")
+            last_error = e
+
+    if text is None:
+        raise last_error or RuntimeError("Aucun modèle disponible")
 
     if text.startswith("```"):
         text = text.split("```")[1]

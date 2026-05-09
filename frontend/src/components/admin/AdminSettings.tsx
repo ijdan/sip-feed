@@ -4,6 +4,12 @@ import useSWR, { mutate } from "swr";
 
 const API = process.env.NEXT_PUBLIC_API_URL;
 
+const MODEL_LABELS: Record<string, { label: string; note?: string }> = {
+  "gemini-2.5-flash": { label: "Gemini 2.5 Flash", note: "Recommandé — meilleure qualité free tier" },
+  "gemini-2.0-flash": { label: "Gemini 2.0 Flash", note: "Bon — fallback quota 2.5" },
+  "gemini-1.5-flash": { label: "Gemini 1.5 Flash", note: "Basique — dernier recours" },
+};
+
 async function apiFetch(path: string, token: string, options: RequestInit = {}) {
   const res = await fetch(`${API}${path}`, {
     ...options,
@@ -17,6 +23,7 @@ async function apiFetch(path: string, token: string, options: RequestInit = {}) 
 interface Settings {
   llm_enabled: boolean;
   translation_enabled: boolean;
+  model_priority: string[];
 }
 
 export default function AdminSettings({ token }: { token: string }) {
@@ -24,49 +31,100 @@ export default function AdminSettings({ token }: { token: string }) {
     "admin-settings",
     () => apiFetch("/admin/settings", token)
   );
-  const [purging, setPurging] = useState(false);
-  const [collecting, setCollecting] = useState(false);
   const [confirm, setConfirm] = useState(false);
+  const [saving, setSaving] = useState(false);
 
-  const updateSetting = async (key: keyof Settings, value: boolean) => {
-    const updated = { ...settings!, [key]: value };
-    if (key === "llm_enabled" && !value) updated.translation_enabled = false;
+  const updateSettings = async (updated: Settings) => {
+    setSaving(true);
     await apiFetch("/admin/settings", token, { method: "PUT", body: JSON.stringify(updated) });
     mutate("admin-settings");
+    setSaving(false);
+  };
+
+  const updateBool = async (key: keyof Settings, value: boolean) => {
+    const updated = { ...settings!, [key]: value };
+    if (key === "llm_enabled" && !value) (updated as any).translation_enabled = false;
+    await updateSettings(updated as Settings);
+  };
+
+  const moveModel = async (index: number, direction: -1 | 1) => {
+    const newOrder = [...settings!.model_priority];
+    const target = index + direction;
+    if (target < 0 || target >= newOrder.length) return;
+    [newOrder[index], newOrder[target]] = [newOrder[target], newOrder[index]];
+    await updateSettings({ ...settings!, model_priority: newOrder });
   };
 
   const handlePurgeAndCollect = async () => {
     if (!confirm) { setConfirm(true); return; }
     setConfirm(false);
-    setPurging(true);
     try {
       await apiFetch("/admin/purge-and-collect", token, { method: "POST" });
       alert("Purge et collecte lancées !");
     } catch {
       alert("Erreur lors du lancement.");
     }
-    setPurging(false);
-    setCollecting(false);
   };
 
   if (isLoading || !settings) return <p className="text-sm text-gray-400">Chargement des paramètres...</p>;
 
   return (
-    <div className="bg-white border rounded-lg p-6 space-y-5">
+    <div className="bg-white border rounded-lg p-6 space-y-6">
       <h3 className="font-semibold text-lg">Paramètres globaux</h3>
 
       <div className="space-y-3">
         <Toggle
-          label="Activer le traitement LLM (Gemini)"
+          label="Activer le traitement LLM"
           checked={settings.llm_enabled}
-          onChange={(v) => updateSetting("llm_enabled", v)}
+          onChange={(v) => updateBool("llm_enabled", v)}
         />
         <Toggle
           label="Activer la traduction en français"
           checked={settings.translation_enabled}
           disabled={!settings.llm_enabled}
-          onChange={(v) => updateSetting("translation_enabled", v)}
+          onChange={(v) => updateBool("translation_enabled", v)}
         />
+      </div>
+
+      <div className="border-t pt-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <p className="text-sm font-medium text-gray-700">Priorité des modèles LLM</p>
+          {saving && <span className="text-xs text-gray-400">Sauvegarde...</span>}
+        </div>
+        <p className="text-xs text-gray-400">Le collector essaie les modèles dans l'ordre. Si le premier est indisponible (quota), il passe au suivant.</p>
+        <div className="space-y-2">
+          {settings.model_priority.map((modelId, i) => {
+            const info = MODEL_LABELS[modelId] ?? { label: modelId };
+            return (
+              <div
+                key={modelId}
+                className="flex items-center gap-3 px-4 py-2 rounded border border-gray-200"
+              >
+                <span className="text-gray-400 text-xs w-4 text-center font-mono">{i + 1}</span>
+                <div className="flex-1 min-w-0">
+                  <span className="text-sm font-medium">{info.label}</span>
+                  {info.note && <span className="ml-2 text-xs text-gray-400">{info.note}</span>}
+                </div>
+                <div className="flex gap-1">
+                  <button
+                    onClick={() => moveModel(i, -1)}
+                    disabled={i === 0 || saving}
+                    className="w-6 h-6 rounded text-gray-400 hover:text-gray-700 hover:bg-gray-100 disabled:opacity-20 text-sm"
+                  >
+                    ▲
+                  </button>
+                  <button
+                    onClick={() => moveModel(i, 1)}
+                    disabled={i === settings.model_priority.length - 1 || saving}
+                    className="w-6 h-6 rounded text-gray-400 hover:text-gray-700 hover:bg-gray-100 disabled:opacity-20 text-sm"
+                  >
+                    ▼
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       <div className="border-t pt-4">
@@ -75,14 +133,11 @@ export default function AdminSettings({ token }: { token: string }) {
         </p>
         <button
           onClick={handlePurgeAndCollect}
-          disabled={purging || collecting}
           className={`px-4 py-2 rounded text-sm font-medium transition ${
-            confirm
-              ? "bg-red-600 text-white hover:bg-red-700"
-              : "bg-gray-900 text-white hover:bg-gray-700"
-          } disabled:opacity-50`}
+            confirm ? "bg-red-600 text-white hover:bg-red-700" : "bg-gray-900 text-white hover:bg-gray-700"
+          }`}
         >
-          {purging ? "Purge en cours..." : collecting ? "Collecte lancée..." : confirm ? "Confirmer la purge ?" : "Forcer la récupération"}
+          {confirm ? "Confirmer la purge ?" : "Forcer la récupération"}
         </button>
         {confirm && (
           <button onClick={() => setConfirm(false)} className="ml-3 text-sm text-gray-500 hover:underline">
@@ -95,10 +150,7 @@ export default function AdminSettings({ token }: { token: string }) {
 }
 
 function Toggle({ label, checked, disabled = false, onChange }: {
-  label: string;
-  checked: boolean;
-  disabled?: boolean;
-  onChange: (v: boolean) => void;
+  label: string; checked: boolean; disabled?: boolean; onChange: (v: boolean) => void;
 }) {
   return (
     <label className={`flex items-center justify-between gap-4 ${disabled ? "opacity-40 cursor-not-allowed" : "cursor-pointer"}`}>
@@ -108,7 +160,7 @@ function Toggle({ label, checked, disabled = false, onChange }: {
         aria-checked={checked}
         disabled={disabled}
         onClick={() => !disabled && onChange(!checked)}
-        className={`relative w-11 h-6 rounded-full transition-colors ${checked ? "bg-blue-600" : "bg-gray-300"} ${disabled ? "cursor-not-allowed" : ""}`}
+        className={`relative w-11 h-6 rounded-full transition-colors ${checked ? "bg-blue-600" : "bg-gray-300"}`}
       >
         <span className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-transform ${checked ? "translate-x-6" : "translate-x-1"}`} />
       </button>

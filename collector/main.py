@@ -19,7 +19,7 @@ db = firestore.Client(project=os.environ.get("FIRESTORE_PROJECT_ID", "tech-news-
 MAX_ARTICLES_PER_RUN = 20
 
 
-DEFAULT_MODEL_PRIORITY = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+DEFAULT_MODEL_PRIORITY = ["gemini-3-flash-preview", "gemini-2.5-flash", "gemini-3.1-flash-lite", "gemma-4-31b-it", "gemma-4-26b-a4b-it", "gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-2.0-flash-lite"]
 
 def get_global_settings() -> dict:
     doc = db.collection("settings").document("global").get()
@@ -45,7 +45,8 @@ def run():
     llm_enabled = global_settings.get("llm_enabled", True)
     translation_enabled = global_settings.get("translation_enabled", True) and llm_enabled
     model_priority = global_settings.get("model_priority", DEFAULT_MODEL_PRIORITY)
-    logger.info(f"Settings — LLM: {llm_enabled}, Traduction FR: {translation_enabled}, Modèles: {model_priority}")
+    gmail_lookback_days = global_settings.get("gmail_lookback_days", 1)
+    logger.info(f"Settings — LLM: {llm_enabled}, Traduction FR: {translation_enabled}, Modèles: {model_priority}, Gmail lookback: {gmail_lookback_days}j")
 
     all_sources = [doc for doc in db.collection("sources").where("active", "==", True).stream()]
     # Gmail en premier pour que les newsletters aient la priorité sur l'attribution
@@ -69,7 +70,7 @@ def run():
             if source["type"] == "web":
                 raw_articles = scrape_source(source)
             elif source["type"] == "gmail":
-                raw_articles = read_gmail_source(source)
+                raw_articles = read_gmail_source(source, lookback_days=gmail_lookback_days)
             else:
                 continue
 

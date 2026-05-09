@@ -113,7 +113,7 @@ def _extract_article_links(html: str, require_read_marker: bool = False) -> list
     return results[:10]
 
 
-def read_gmail_source(source: dict) -> list[dict]:
+def read_gmail_source(source: dict, lookback_days: int = 1) -> list[dict]:
     """Lit les emails d'un expéditeur donné et extrait les articles."""
     import logging
     logger = logging.getLogger(__name__)
@@ -123,7 +123,7 @@ def read_gmail_source(source: dict) -> list[dict]:
 
     results = service.users().messages().list(
         userId="me",
-        q=f"from:{sender} newer_than:1d",
+        q=f"from:{sender} newer_than:{lookback_days}d",
         maxResults=10,
     ).execute()
 

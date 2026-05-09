@@ -5,9 +5,14 @@ import useSWR, { mutate } from "swr";
 const API = process.env.NEXT_PUBLIC_API_URL;
 
 const MODEL_LABELS: Record<string, { label: string; note?: string }> = {
-  "gemini-2.5-flash": { label: "Gemini 2.5 Flash", note: "Recommandé — meilleure qualité free tier" },
-  "gemini-2.0-flash": { label: "Gemini 2.0 Flash", note: "Bon — fallback quota 2.5" },
-  "gemini-1.5-flash": { label: "Gemini 1.5 Flash", note: "Basique — dernier recours" },
+  "gemini-3-flash-preview":  { label: "Gemini 3 Flash",       note: "Dernière génération" },
+  "gemini-2.5-flash":        { label: "Gemini 2.5 Flash",     note: "Très bon — éprouvé" },
+  "gemini-3.1-flash-lite":   { label: "Gemini 3.1 Flash Lite",note: "Rapide — 3.1" },
+  "gemma-4-31b-it":          { label: "Gemma 4 31B",          note: "Open source — 31B" },
+  "gemma-4-26b-a4b-it":      { label: "Gemma 4 26B",          note: "Open source — 26B" },
+  "gemini-2.5-flash-lite":   { label: "Gemini 2.5 Flash Lite",note: "Léger — 2.5" },
+  "gemini-2.0-flash":        { label: "Gemini 2.0 Flash",     note: "Fallback" },
+  "gemini-2.0-flash-lite":   { label: "Gemini 2.0 Flash Lite",note: "Dernier recours" },
 };
 
 async function apiFetch(path: string, token: string, options: RequestInit = {}) {
@@ -20,10 +25,13 @@ async function apiFetch(path: string, token: string, options: RequestInit = {}) 
   return res.json();
 }
 
+const LOOKBACK_OPTIONS = [1, 2, 3, 5, 7, 10];
+
 interface Settings {
   llm_enabled: boolean;
   translation_enabled: boolean;
   model_priority: string[];
+  gmail_lookback_days: number;
 }
 
 export default function AdminSettings({ token }: { token: string }) {
@@ -45,6 +53,10 @@ export default function AdminSettings({ token }: { token: string }) {
     const updated = { ...settings!, [key]: value };
     if (key === "llm_enabled" && !value) (updated as any).translation_enabled = false;
     await updateSettings(updated as Settings);
+  };
+
+  const updateLookback = async (days: number) => {
+    await updateSettings({ ...settings!, gmail_lookback_days: days });
   };
 
   const moveModel = async (index: number, direction: -1 | 1) => {
@@ -84,6 +96,25 @@ export default function AdminSettings({ token }: { token: string }) {
           disabled={!settings.llm_enabled}
           onChange={(v) => updateBool("translation_enabled", v)}
         />
+        <div className="flex items-center justify-between gap-4">
+          <span className="text-sm text-gray-700">Récupération emails Gmail (jours)</span>
+          <div className="flex gap-1">
+            {LOOKBACK_OPTIONS.map((d) => (
+              <button
+                key={d}
+                onClick={() => updateLookback(d)}
+                disabled={saving}
+                className={`w-9 h-8 rounded text-sm border transition ${
+                  settings.gmail_lookback_days === d
+                    ? "bg-gray-900 text-white border-gray-900"
+                    : "bg-white text-gray-600 border-gray-300 hover:border-gray-500"
+                } disabled:opacity-50`}
+              >
+                {d}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
       <div className="border-t pt-4 space-y-3">

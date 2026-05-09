@@ -17,15 +17,21 @@ CLOUD_RUN_JOB_URL = (
 
 
 DEFAULT_MODEL_PRIORITY = [
+    "gemini-3-flash-preview",
     "gemini-2.5-flash",
+    "gemini-3.1-flash-lite",
+    "gemma-4-31b-it",
+    "gemma-4-26b-a4b-it",
+    "gemini-2.5-flash-lite",
     "gemini-2.0-flash",
-    "gemini-1.5-flash",
+    "gemini-2.0-flash-lite",
 ]
 
 class GlobalSettings(BaseModel):
     llm_enabled: bool = True
     translation_enabled: bool = True
     model_priority: list[str] = DEFAULT_MODEL_PRIORITY
+    gmail_lookback_days: int = 1
 
 
 def _get_access_token() -> str:

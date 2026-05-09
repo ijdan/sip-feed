@@ -83,7 +83,15 @@ def run():
     retention_days = global_settings.get("retention_days", 0)
     logger.info(f"Settings — LLM: {llm_enabled}, Thinking: {thinking_enabled}, Modèles: {model_priority}, Gmail lookback: {gmail_lookback_days}j, Rétention: {'illimitée' if retention_days == 0 else str(retention_days) + 'j'}")
 
-    all_sources = [doc for doc in db.collection("sources").where("active", "==", True).stream()]
+    # Si une source spécifique est demandée, ne traiter que celle-là
+    specific_source_id = os.environ.get("COLLECTOR_SOURCE_ID")
+    if specific_source_id:
+        doc = db.collection("sources").document(specific_source_id).get()
+        all_sources = [doc] if doc.exists else []
+        logger.info(f"Mode source unique : {specific_source_id}")
+    else:
+        all_sources = [doc for doc in db.collection("sources").where("active", "==", True).stream()]
+
     # Gmail en premier pour que les newsletters aient la priorité sur l'attribution
     sources = sorted(all_sources, key=lambda d: 0 if d.to_dict().get("type") == "gmail" else 1)
     logger.info(f"{len(sources)} source(s) active(s) :")

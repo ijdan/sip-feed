@@ -80,21 +80,47 @@ def purge_articles(_: dict = Depends(require_admin)):
     batch.commit()
 
 
+def _trigger_job(source_id: str | None = None) -> dict:
+    """Déclenche le Cloud Run Job, avec filtre source optionnel."""
+    token = _get_access_token()
+    body: dict = {}
+    if source_id:
+        body = {
+            "overrides": {
+                "containerOverrides": [{
+                    "env": [{"name": "COLLECTOR_SOURCE_ID", "value": source_id}]
+                }]
+            }
+        }
+    resp = httpx.post(
+        CLOUD_RUN_JOB_URL,
+        headers={"Authorization": f"Bearer {token}"},
+        json=body,
+        timeout=15,
+    )
+    if resp.status_code not in (200, 202):
+        raise HTTPException(status_code=502, detail=f"Cloud Run error: {resp.text}")
+    return {"status": "triggered", "source_id": source_id}
+
+
 @router.post("/collect", status_code=202)
 def trigger_collection(_: dict = Depends(require_admin)):
     try:
-        token = _get_access_token()
-        resp = httpx.post(
-            CLOUD_RUN_JOB_URL,
-            headers={"Authorization": f"Bearer {token}"},
-            json={},
-            timeout=15,
-        )
-        if resp.status_code not in (200, 202):
-            raise HTTPException(status_code=502, detail=f"Cloud Run error: {resp.text}")
+        return _trigger_job()
     except httpx.RequestError as e:
         raise HTTPException(status_code=502, detail=str(e))
-    return {"status": "triggered"}
+
+
+@router.post("/sources/{source_id}/collect", status_code=202)
+def collect_single_source(source_id: str, _: dict = Depends(require_admin)):
+    """Déclenche la collecte pour une source spécifique uniquement."""
+    db = get_db()
+    if not db.collection("sources").document(source_id).get().exists:
+        raise HTTPException(status_code=404, detail="Source introuvable")
+    try:
+        return _trigger_job(source_id=source_id)
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=502, detail=str(e))
 
 
 @router.post("/purge-and-collect", status_code=202)

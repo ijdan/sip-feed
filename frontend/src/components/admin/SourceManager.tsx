@@ -14,10 +14,21 @@ async function toggleSource(token: string, id: string) {
   return res.json();
 }
 
+async function collectSource(token: string, id: string) {
+  const res = await fetch(`${API}/admin/sources/${id}/collect`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("Collect failed");
+  return res.json();
+}
+
 export default function SourceManager({ token }: { token: string }) {
   const { data: sources, isLoading } = useSWR("sources", () => api.sources.list(token));
   const [form, setForm] = useState({ name: "", type: "web", url: "", gmail_sender: "" });
   const [submitting, setSubmitting] = useState(false);
+  const [collecting, setCollecting] = useState<string | null>(null);
+  const [collectStatus, setCollectStatus] = useState<Record<string, string>>({});
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -35,6 +46,20 @@ export default function SourceManager({ token }: { token: string }) {
   const handleToggle = async (id: string) => {
     await toggleSource(token, id);
     mutate("sources");
+  };
+
+  const handleCollect = async (id: string) => {
+    setCollecting(id);
+    setCollectStatus((prev) => ({ ...prev, [id]: "" }));
+    try {
+      await collectSource(token, id);
+      setCollectStatus((prev) => ({ ...prev, [id]: "✓ Collecte lancée" }));
+    } catch {
+      setCollectStatus((prev) => ({ ...prev, [id]: "✗ Erreur" }));
+    } finally {
+      setCollecting(null);
+      setTimeout(() => setCollectStatus((prev) => ({ ...prev, [id]: "" })), 4000);
+    }
   };
 
   const handleDelete = async (id: string) => {
@@ -103,7 +128,19 @@ export default function SourceManager({ token }: { token: string }) {
                 </span>
               </div>
             </div>
-            <div className="flex items-center gap-3 shrink-0">
+            <div className="flex items-center gap-2 shrink-0">
+              {collectStatus[s.id] && (
+                <span className={`text-xs ${collectStatus[s.id].startsWith("✓") ? "text-green-600" : "text-red-500"}`}>
+                  {collectStatus[s.id]}
+                </span>
+              )}
+              <button
+                onClick={() => handleCollect(s.id)}
+                disabled={collecting === s.id}
+                className="text-xs px-2 py-1 rounded border border-blue-300 text-blue-600 hover:border-blue-500 disabled:opacity-50 transition"
+              >
+                {collecting === s.id ? "..." : "Collecter"}
+              </button>
               <button
                 onClick={() => handleToggle(s.id)}
                 className={`text-xs px-2 py-1 rounded border transition ${s.active ? "border-gray-300 text-gray-600 hover:border-gray-500" : "border-blue-300 text-blue-600 hover:border-blue-500"}`}

@@ -1,12 +1,19 @@
+import os
+import subprocess
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from google.auth import default as google_auth_default
 from google.auth.transport.requests import Request as GoogleRequest
+from pathlib import Path
 
 from app.auth.google_oauth import require_admin
 from app.db.firestore import get_db
 from app.config import settings
+
+# Chemin vers le collector (relatif au projet)
+COLLECTOR_DIR = Path(__file__).resolve().parents[3] / "collector"
+IS_LOCAL = bool(os.environ.get("FIRESTORE_EMULATOR_HOST"))
 
 router = APIRouter()
 
@@ -80,6 +87,28 @@ def purge_articles(_: dict = Depends(require_admin)):
     batch.commit()
 
 
+def _trigger_local(source_id: str | None = None) -> dict:
+    """En local : lance le collector en sous-processus avec l'émulateur."""
+    venv_python = COLLECTOR_DIR / "venv" / "bin" / "python"
+    python = str(venv_python) if venv_python.exists() else "python3"
+    env = {
+        **os.environ,
+        "GRPC_DNS_RESOLVER": "native",
+        "GOOGLE_CLOUD_PROJECT": settings.firestore_project_id,
+    }
+    if source_id:
+        env["COLLECTOR_SOURCE_ID"] = source_id
+
+    subprocess.Popen(
+        [python, "main.py"],
+        cwd=str(COLLECTOR_DIR),
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    return {"status": "triggered_local", "source_id": source_id}
+
+
 def _trigger_job(source_id: str | None = None) -> dict:
     """Déclenche le Cloud Run Job, avec filtre source optionnel."""
     token = _get_access_token()
@@ -105,6 +134,8 @@ def _trigger_job(source_id: str | None = None) -> dict:
 
 @router.post("/collect", status_code=202)
 def trigger_collection(_: dict = Depends(require_admin)):
+    if IS_LOCAL:
+        return _trigger_local()
     try:
         return _trigger_job()
     except httpx.RequestError as e:
@@ -117,6 +148,8 @@ def collect_single_source(source_id: str, _: dict = Depends(require_admin)):
     db = get_db()
     if not db.collection("sources").document(source_id).get().exists:
         raise HTTPException(status_code=404, detail="Source introuvable")
+    if IS_LOCAL:
+        return _trigger_local(source_id=source_id)
     try:
         return _trigger_job(source_id=source_id)
     except httpx.RequestError as e:

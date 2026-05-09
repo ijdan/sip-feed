@@ -10,6 +10,7 @@ async function apiFetch(path: string, token: string, options: RequestInit = {}) 
     },
   });
   if (!res.ok) throw new Error(`API error ${res.status}`);
+  if (res.status === 204) return null;
   return res.json();
 }
 

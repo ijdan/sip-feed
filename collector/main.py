@@ -9,10 +9,21 @@ from google.cloud import firestore
 
 from scrapers.web_scraper import scrape_source
 from scrapers.gmail_reader import read_gmail_source
-from processors.gemini_processor import enrich_articles_batch, save_raw_articles
+from processors.gemini_processor import enrich_articles_batch, save_raw_articles, generate_run_report
+
+# Handler pour capturer les logs en mémoire
+class _MemoryHandler(logging.Handler):
+    def __init__(self):
+        super().__init__()
+        self.records: list[str] = []
+    def emit(self, record):
+        self.records.append(self.format(record))
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+_mem_handler = _MemoryHandler()
+_mem_handler.setFormatter(logging.Formatter("%(levelname)s:%(name)s:%(message)s"))
+logging.getLogger().addHandler(_mem_handler)
 
 db = firestore.Client(project=os.environ.get("FIRESTORE_PROJECT_ID", "tech-news-aggregator-001"))
 
@@ -69,47 +80,65 @@ def run():
         try:
             if source["type"] == "web":
                 raw_articles = scrape_source(source)
+                for raw in raw_articles:
+                    if len(all_raw) >= MAX_ARTICLES_PER_RUN:
+                        break
+                    url = raw["article_url"]
+                    if url in seen_urls or already_exists(url):
+                        logger.info(f"  Déjà collecté, ignoré : {raw['title'][:60]}")
+                        continue
+                    seen_urls.add(url)
+                    all_raw.append(raw)
+                    logger.info(f"  Nouveau : {raw['title'][:60]}")
+
             elif source["type"] == "gmail":
                 raw_articles = read_gmail_source(source, lookback_days=gmail_lookback_days)
-            else:
-                continue
-
-            for raw in raw_articles:
-                if len(all_raw) >= MAX_ARTICLES_PER_RUN:
-                    break
-                url = raw["article_url"]
-                if url in seen_urls or already_exists(url):
-                    logger.info(f"  Déjà collecté, ignoré : {raw['title'][:60]}")
-                    continue
-                seen_urls.add(url)
-                all_raw.append(raw)
-                logger.info(f"  Nouveau : {raw['title'][:60]}")
+                for raw in raw_articles:
+                    if len(all_raw) >= MAX_ARTICLES_PER_RUN:
+                        break
+                    url = raw["article_url"]
+                    if url in seen_urls or already_exists(url):
+                        logger.info(f"  Déjà collecté, ignoré : {raw['title'][:60]}")
+                        continue
+                    seen_urls.add(url)
+                    all_raw.append(raw)
+                    logger.info(f"  Nouveau : {raw['title'][:60]}")
 
         except Exception as e:
-            logger.error(f"Erreur scraping {source['name']}: {e}")
+            logger.error(f"Erreur source {source['name']}: {e}")
 
     if not all_raw:
         logger.info("Aucun nouvel article à traiter.")
-        return
-
-    # Étape 2 : traitement LLM ou brut selon settings
-    if llm_enabled:
-        logger.info(f"Envoi de {len(all_raw)} article(s) à Gemini (traduction FR: {translation_enabled})...")
-        try:
-            enriched_articles = enrich_articles_batch(all_raw, translate=translation_enabled, model_priority=model_priority)
-        except Exception as e:
-            logger.error(f"Tous les modèles LLM ont échoué ({e.__class__.__name__}) — sauvegarde des articles bruts sans enrichissement.")
-            enriched_articles = save_raw_articles(all_raw)
     else:
-        logger.info("LLM désactivé — sauvegarde des articles bruts.")
-        enriched_articles = save_raw_articles(all_raw)
+        # Étape 2 : traitement LLM ou brut selon settings
+        if llm_enabled:
+            logger.info(f"Envoi de {len(all_raw)} article(s) à Gemini (traduction FR: {translation_enabled})...")
+            try:
+                enriched_articles = enrich_articles_batch(all_raw, translate=translation_enabled, model_priority=model_priority)
+            except Exception as e:
+                logger.error(f"Tous les modèles LLM ont échoué ({e.__class__.__name__}) — sauvegarde des articles bruts sans enrichissement.")
+                enriched_articles = save_raw_articles(all_raw)
+        else:
+            logger.info("LLM désactivé — sauvegarde des articles bruts.")
+            enriched_articles = save_raw_articles(all_raw)
 
-    # Étape 3 : sauvegarde dans Firestore
-    for article in enriched_articles:
-        db.collection("articles").document(article["id"]).set(article)
-        logger.info(f"  Sauvegardé : {article['title'][:60]}")
+        # Étape 3 : sauvegarde dans Firestore
+        for article in enriched_articles:
+            db.collection("articles").document(article["id"]).set(article)
+            logger.info(f"  Sauvegardé : {article['title'][:60]}")
 
-    logger.info(f"Collecte terminée — {len(enriched_articles)} article(s) ajouté(s).")
+        logger.info(f"Collecte web terminée — {len(enriched_articles)} article(s) ajouté(s).")
+
+    # Rapport de synthèse via LLM — toujours généré
+    run_logs = "\n".join(_mem_handler.records)
+    report = generate_run_report(run_logs, model_priority)
+    logger.info("=" * 60)
+    logger.info("📋 RAPPORT D'EXÉCUTION")
+    logger.info("=" * 60)
+    for line in report.splitlines():
+        if line.strip():
+            logger.info(line)
+    logger.info("=" * 60)
 
 
 if __name__ == "__main__":

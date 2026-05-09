@@ -1,44 +1,11 @@
 import os
 import re
 import base64
-import json
 from datetime import datetime
-from urllib.parse import unquote, urlparse
-from bs4 import BeautifulSoup
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
-
-# Mots-clés à exclure pour filtrer les liens parasites (désabo, pub)
-EXCLUDED_URL_PATTERNS = [
-    "unsubscribe", "optout", "mailto:", "utm_",
-    "refer.tldr.tech", "referral",
-    "linkedin.com/jobs", "ashbyhq.com", "jobs.", "/careers", "greenhouse.io",
-    "advertise", "sponsor", "feedback", "survey",
-    "manage-preferences", "view-online", "view_online",
-    "manage.tldrnewsletter.com", "tldr.tech/infose",
-]
-
-EXCLUDED_TITLE_PATTERNS = [
-    "manage your", "subscribe", "unsubscribe", "view online",
-    "create your own role", "send a friend", "refer a friend",
-    "track your referral", "pulling back the curtain",
-    "sponsor", "advertise", "click here", "check out the",
-    "save your spot", "ship api", "see how ", "learn more",
-]
-
-MIN_TITLE_LENGTH = 20
-TLDR_ARTICLE_MARKER = "minute read"  # marqueur présent sur tous les vrais articles TLDR
-
-
-def _decode_tracking_url(href: str) -> str:
-    """Extrait l'URL originale d'un lien de tracking TLDR."""
-    if "tracking.tldrnewsletter.com/CL0/" in href:
-        parts = href.split("/CL0/", 1)
-        if len(parts) == 2:
-            return unquote(parts[1]).split("/0100")[0].split("?")[0]
-    return href
 
 
 def _get_gmail_service():
@@ -51,70 +18,104 @@ def _get_gmail_service():
     return build("gmail", "v1", credentials=creds)
 
 
-def _decode_body(payload: dict) -> str:
-    """Décode le corps HTML ou texte d'un email."""
+def _decode_plain_body(payload: dict) -> str:
+    """Extrait le corps texte brut de l'email (priorité text/plain)."""
+    def _decode(data: str) -> str:
+        return base64.urlsafe_b64decode(data).decode("utf-8", errors="ignore") if data else ""
+
     if "parts" in payload:
         for part in payload["parts"]:
-            if part["mimeType"] == "text/html":
-                data = part["body"].get("data", "")
-                return base64.urlsafe_b64decode(data).decode("utf-8", errors="ignore")
-    data = payload.get("body", {}).get("data", "")
-    return base64.urlsafe_b64decode(data).decode("utf-8", errors="ignore") if data else ""
+            if part["mimeType"] == "text/plain":
+                return _decode(part["body"].get("data", ""))
+        # Fallback récursif sur les parts imbriquées
+        for part in payload["parts"]:
+            result = _decode_plain_body(part)
+            if result:
+                return result
+    return _decode(payload.get("body", {}).get("data", ""))
 
 
-def _get_sibling_description(tag) -> str:
-    """Récupère le texte descriptif qui suit un lien dans la newsletter."""
-    texts = []
-    for sibling in tag.next_siblings:
-        name = getattr(sibling, "name", None)
-        if name in ("a",):
-            break
-        text = sibling.get_text(strip=True) if name else str(sibling).strip()
-        if text and len(text) > 20:
-            texts.append(text)
-        if len(" ".join(texts)) > 400:
-            break
-    return " ".join(texts)[:500]
+def _detect_tldr_category(body: str) -> str | None:
+    """Détecte la catégorie TLDR depuis l'en-tête de la newsletter."""
+    m = re.search(r'TLDR\s+([A-Z][A-Z\s]*?)\s+\d{4}-\d{2}-\d{2}', body)
+    if not m:
+        return None
+    raw = m.group(1).strip().upper()
+    mapping = {
+        "AI": "AI", "INFORMATION SECURITY": "Security", "SECURITY": "Security",
+        "FINTECH": "Fintech", "IT": "IT", "DEV": "Dev", "WEB DEV": "Dev",
+        "CRYPTO": "Crypto", "FOUNDERS": "Founders", "MARKETING": "Marketing",
+        "PRODUCT": "Product", "DESIGN": "Design", "DATA": "Data",
+        "ROBOTICS": "Robotics",
+    }
+    return mapping.get(raw, raw.title())
 
 
-def _extract_article_links(html: str, require_read_marker: bool = False) -> list[dict]:
-    """Extrait les liens et descriptions d'une newsletter HTML."""
-    soup = BeautifulSoup(html, "html.parser")
-    seen = set()
-    results = []
+def _parse_tldr_articles(body: str) -> list[dict]:
+    """
+    Parse le format texte brut TLDR :
+      Article Title (3 MINUTE READ) [N]
+      Description in English...
 
-    for a in soup.find_all("a", href=True):
-        href = a["href"]
-        text = a.get_text(strip=True)
+      Links:
+      [N] https://url
+    """
+    # 1. Extraire les liens numérotés depuis la section "Links:"
+    links: dict[str, str] = {}
+    for m in re.finditer(r'\[(\d+)\]\s+(https?://\S+)', body):
+        links[m.group(1)] = m.group(2).rstrip('.')
 
-        if not text or len(text) < MIN_TITLE_LENGTH:
+    # 2. Travailler uniquement sur le contenu avant "Links:"
+    links_idx = body.rfind('Links:')
+    content = body[:links_idx] if links_idx > 0 else body
+
+    # 3. Découper en paragraphes
+    paragraphs = [
+        re.sub(r'\s+', ' ', p).strip()
+        for p in re.split(r'\r?\n\s*\r?\n', content)
+    ]
+
+    articles = []
+    for i, p in enumerate(paragraphs):
+        # Format attendu : "Title (META) [N]"
+        m = re.match(r'^(.+?)\s*\(([^)]+)\)\s*\[(\d+)\]\s*$', p)
+        if not m:
             continue
-        if any(p in href.lower() for p in EXCLUDED_URL_PATTERNS):
-            continue
-        if any(p in text.lower() for p in EXCLUDED_TITLE_PATTERNS):
-            continue
-        if require_read_marker and TLDR_ARTICLE_MARKER not in text.lower():
+
+        title = m.group(1).strip()
+        meta = m.group(2).strip().upper()
+        link_num = m.group(3)
+
+        # Ignorer les sponsors
+        if 'SPONSOR' in meta or 'SPONSOR' in title.upper():
             continue
 
-        # Décoder l'URL originale pour la déduplication
-        original_url = _decode_tracking_url(href)
-        if original_url in seen:
+        # Garder seulement les articles avec temps de lecture ou GitHub
+        has_read_time = bool(re.search(r'\d+\s+MINUTE\s+READ', meta))
+        is_github = 'GITHUB REPO' in meta
+        if not has_read_time and not is_github:
             continue
 
-        clean_title = re.sub(r'\s*\(\d+\s*minute read\)', '', text, flags=re.IGNORECASE).strip()
-        description = _get_sibling_description(a)
-        seen.add(original_url)
-        results.append({
-            "title": clean_title,
-            "article_url": original_url,
-            "raw_content": f"{clean_title}. {description}".strip() if description else clean_title,
+        # Description = paragraphe suivant (doit être substantiel)
+        detail = (paragraphs[i + 1] if i + 1 < len(paragraphs) else '').strip()
+        if not detail or len(detail) < 30:
+            continue
+
+        url = links.get(link_num, '')
+        if not url:
+            continue
+
+        articles.append({
+            'title': title,
+            'raw_content': detail,
+            'article_url': url,
         })
 
-    return results[:10]
+    return articles
 
 
 def read_gmail_source(source: dict, lookback_days: int = 1) -> list[dict]:
-    """Lit les emails d'un expéditeur donné et extrait les articles."""
+    """Lit les emails d'un expéditeur et extrait les articles."""
     import logging
     logger = logging.getLogger(__name__)
 
@@ -124,29 +125,40 @@ def read_gmail_source(source: dict, lookback_days: int = 1) -> list[dict]:
     results = service.users().messages().list(
         userId="me",
         q=f"from:{sender} newer_than:{lookback_days}d",
-        maxResults=10,
+        maxResults=50,
     ).execute()
 
     messages = results.get("messages", [])
     logger.info(f"  Gmail : {len(messages)} email(s) trouvé(s) de {sender}")
-    articles = []
 
+    all_articles = []
     for i, msg_ref in enumerate(messages, 1):
         msg = service.users().messages().get(
             userId="me", id=msg_ref["id"], format="full"
         ).execute()
 
-        html_body = _decode_body(msg["payload"])
-        is_tldr = "tldr" in sender.lower()
-        links = _extract_article_links(html_body, require_read_marker=is_tldr)
-        logger.info(f"  Email {i}/{len(messages)} : {len(links)} article(s) extrait(s)")
+        # Date réelle de réception de l'email (internalDate en ms)
+        email_date = datetime.utcfromtimestamp(
+            int(msg.get("internalDate", 0)) / 1000
+        ).isoformat()
 
-        for link in links:
-            articles.append({
-                **link,
+        body = _decode_plain_body(msg["payload"])
+        category = _detect_tldr_category(body)
+
+        if category:
+            articles = _parse_tldr_articles(body)
+            logger.info(f"  Email {i}/{len(messages)} [TLDR {category}] du {email_date[:10]} : {len(articles)} article(s)")
+        else:
+            articles = []
+            logger.info(f"  Email {i}/{len(messages)} : format non reconnu, ignoré")
+
+        for art in articles:
+            all_articles.append({
+                **art,
                 "source_name": source["name"],
                 "source_id": source["id"],
-                "published_at": datetime.utcnow().isoformat(),
+                "published_at": email_date,
             })
 
-    return articles
+    logger.info(f"  Total extrait : {len(all_articles)} article(s)")
+    return all_articles

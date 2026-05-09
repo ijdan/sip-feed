@@ -133,13 +133,14 @@ def run():
     # Rapport de synthèse via LLM — toujours généré
     run_logs = "\n".join(_mem_handler.records)
     report = generate_run_report(run_logs, model_priority)
-    logger.info("=" * 60)
-    logger.info("📋 RAPPORT D'EXÉCUTION")
-    logger.info("=" * 60)
-    for line in report.splitlines():
-        if line.strip():
-            logger.info(line)
-    logger.info("=" * 60)
+
+    # Persistance du rapport dans Firestore
+    from datetime import datetime as _dt
+    db.collection("reports").document("latest").set({
+        "content": report,
+        "generated_at": _dt.utcnow().isoformat(),
+    })
+    logger.info("📋 Rapport d'exécution généré et sauvegardé.")
 
 
 if __name__ == "__main__":

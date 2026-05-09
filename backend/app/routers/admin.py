@@ -103,6 +103,15 @@ def purge_and_collect(current_user: dict = Depends(require_admin)):
     return trigger_collection(current_user)
 
 
+@router.get("/report")
+def get_latest_report(_: dict = Depends(require_admin)):
+    db = get_db()
+    doc = db.collection("reports").document("latest").get()
+    if not doc.exists:
+        return {"content": None, "generated_at": None}
+    return doc.to_dict()
+
+
 @router.get("/logs")
 def get_collector_logs(limit: int = Query(100, le=500), _: dict = Depends(require_admin)):
     try:

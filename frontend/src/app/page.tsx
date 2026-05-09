@@ -43,7 +43,7 @@ export default function FeedPage() {
     if (next.has(source)) next.delete(source);
     else next.add(source);
     setExcludedSources(next);
-    localStorage.setItem("feed-excluded-sources", JSON.stringify([...next]));
+    localStorage.setItem("feed-excluded-sources", JSON.stringify(Array.from(next)));
   };
 
   const articlesUrl = `${process.env.NEXT_PUBLIC_API_URL}/articles/${category ? "?category=" + category : ""}`;

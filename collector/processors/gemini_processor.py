@@ -19,18 +19,33 @@ DEFAULT_MODEL_PRIORITY = [
 
 CATEGORIES = ["IA", "DevOps", "Cloud", "Sécurité", "Dev", "IT", "Autre"]
 
-BATCH_PROMPT_FR = """
-Tu es journaliste tech francophone exigeant. Pour chaque article anglais ci-dessous, produis une version française qui :
-- traduit avec un français fluide et idiomatique (pas du mot-à-mot)
-- explicite ce qui est implicite : si un acronyme, une entreprise ou un produit obscur apparaît, ajoute une courte glose entre parenthèses
-- conserve les noms propres et sigles techniques en VO (OpenAI, AWS, GPT, etc.)
-- adopte un ton journalistique précis et accessible
-- n'invente aucun fait absent du contenu fourni
+BATCH_PROMPT_BILINGUAL = """
+Tu es journaliste tech bilingue (français / anglais).
+Pour chaque article ci-dessous, produis simultanément deux fiches : une en français, une en anglais.
 
-Pour chaque article, produis ces champs :
-- "title" (max 12 mots) : titre clair et percutant en français
-- "short_description" (1 phrase ~25 mots) : pitch qui pose l'enjeu central
-- "long_description" (4 à 6 phrases) : reformulation enrichie — contexte, mécanisme, implications
+Règles communes :
+- Conserve les noms propres, acronymes et sigles techniques en VO (OpenAI, AWS, GPT, Kubernetes, etc.)
+- Sois factuel : cite technologies, entreprises, chiffres clés
+- Ajoute du contexte pertinent si tu le connais
+- N'invente aucun fait absent du contenu fourni
+
+Version française :
+- Français fluide et idiomatique (pas du mot-à-mot)
+- Si un acronyme ou produit obscur apparaît, ajoute une glose entre parenthèses
+- Ton journalistique précis et accessible
+
+Version anglaise :
+- Reformulation journalistique claire, pas le texte brut source
+- Style concis à l'américaine (WSJ, TechCrunch)
+- Reformule le titre si trop technique pour un public large
+
+Pour chaque article, produis exactement ces champs :
+- "title_fr" (max 12 mots) : titre percutant en français
+- "title_en" (max 12 mots) : titre journalistique en anglais
+- "short_description_fr" (1 phrase ~25 mots) : accroche en français
+- "short_description_en" (1 phrase ~25 mots) : accroche en anglais
+- "long_description_fr" (4 à 6 phrases) : analyse enrichie en français
+- "long_description_en" (4 à 6 phrases) : analyse enrichie en anglais
 - "category" : une valeur parmi {categories}
 
 Articles à traiter :
@@ -39,35 +54,10 @@ Articles à traiter :
 Réponds avec un tableau JSON de {count} objets dans le même ordre :
 """
 
-BATCH_PROMPT_NO_TRANSLATION = """
-Tu es un assistant spécialisé en veille technologique.
-Tu vas traiter {count} articles en une seule passe.
-
-Pour chaque article, produis un résumé structuré dans la langue de la source.
-
-Règles :
-- Conserve la langue originale de l'article
-- Sois factuel : cite technologies, versions, entreprises, chiffres clés
-- Style : concis, professionnel
-- N'invente aucun fait
-
-Articles à traiter :
-{articles}
-
-Réponds UNIQUEMENT avec un tableau JSON valide de {count} objets :
-[
-  {{
-    "title": "titre original ou légèrement reformulé (max 90 caractères)",
-    "short_description": "résumé en 2 phrases maximum",
-    "long_description": "résumé détaillé en 5 à 8 phrases",
-    "category": "une valeur parmi {categories}"
-  }}
-]
-"""
 
 
-def enrich_articles_batch(raw_articles: list[dict], translate: bool = True, model_priority: list[str] | None = None, thinking: bool = True) -> list[dict]:
-    """Traite tous les articles en un seul appel Gemini, avec fallback sur les modèles suivants."""
+def enrich_articles_batch(raw_articles: list[dict], model_priority: list[str] | None = None, thinking: bool = True, **_) -> list[dict]:
+    """Traite tous les articles en un seul appel Gemini — produit FR + EN simultanément."""
     articles_text = ""
     for i, raw in enumerate(raw_articles):
         articles_text += (
@@ -76,8 +66,7 @@ def enrich_articles_batch(raw_articles: list[dict], translate: bool = True, mode
             f"CONTENU_EN: {raw.get('raw_content', '')[:1500]}\n\n"
         )
 
-    template = BATCH_PROMPT_FR if translate else BATCH_PROMPT_NO_TRANSLATION
-    prompt = template.format(
+    prompt = BATCH_PROMPT_BILINGUAL.format(
         count=len(raw_articles),
         articles=articles_text,
         categories=", ".join(CATEGORIES),
@@ -96,16 +85,22 @@ def enrich_articles_batch(raw_articles: list[dict], translate: bool = True, mode
 
     results = []
     for i, raw in enumerate(raw_articles):
-        enriched = enriched_list[i] if i < len(enriched_list) else {}
+        e = enriched_list[i] if i < len(enriched_list) else {}
         results.append({
             "id": str(uuid.uuid4()),
-            "title": enriched.get("title", raw["title"]),
-            "short_description": enriched.get("short_description", ""),
-            "long_description": enriched.get("long_description", ""),
+            "title_fr": e.get("title_fr", raw["title"]),
+            "title_en": e.get("title_en", raw["title"]),
+            "title": e.get("title_fr", raw["title"]),  # compat
+            "short_description_fr": e.get("short_description_fr", ""),
+            "short_description_en": e.get("short_description_en", ""),
+            "short_description": e.get("short_description_fr", ""),  # compat
+            "long_description_fr": e.get("long_description_fr", ""),
+            "long_description_en": e.get("long_description_en", ""),
+            "long_description": e.get("long_description_fr", ""),  # compat
             "article_url": raw["article_url"],
             "source_name": raw["source_name"],
             "source_id": raw["source_id"],
-            "category": enriched.get("category", "Autre"),
+            "category": e.get("category", "Autre") if e.get("category") in CATEGORIES else "Autre",
             "published_at": raw.get("published_at", datetime.utcnow().isoformat()),
             "collected_at": datetime.utcnow().isoformat(),
         })
@@ -297,12 +292,18 @@ def generate_run_report(logs: str, model_priority: list[str] | None = None) -> s
 
 
 def save_raw_articles(raw_articles: list[dict]) -> list[dict]:
-    """Sauvegarde les articles sans traitement LLM."""
+    """Sauvegarde les articles sans traitement LLM (fallback quota)."""
     return [
         {
             "id": str(uuid.uuid4()),
+            "title_fr": raw["title"],
+            "title_en": raw["title"],
             "title": raw["title"],
+            "short_description_fr": raw.get("raw_content", "")[:200],
+            "short_description_en": raw.get("raw_content", "")[:200],
             "short_description": raw.get("raw_content", "")[:200],
+            "long_description_fr": raw.get("raw_content", "")[:1000],
+            "long_description_en": raw.get("raw_content", "")[:1000],
             "long_description": raw.get("raw_content", "")[:1000],
             "article_url": raw["article_url"],
             "source_name": raw["source_name"],

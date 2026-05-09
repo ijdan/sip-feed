@@ -77,12 +77,11 @@ def apply_retention(retention_days: int) -> int:
 def run():
     global_settings = get_global_settings()
     llm_enabled = global_settings.get("llm_enabled", True)
-    translation_enabled = global_settings.get("translation_enabled", True) and llm_enabled
     thinking_enabled = global_settings.get("thinking_enabled", True) and llm_enabled
     model_priority = global_settings.get("model_priority", DEFAULT_MODEL_PRIORITY)
     gmail_lookback_days = global_settings.get("gmail_lookback_days", 1)
     retention_days = global_settings.get("retention_days", 0)
-    logger.info(f"Settings — LLM: {llm_enabled}, Traduction FR: {translation_enabled}, Thinking: {thinking_enabled}, Modèles: {model_priority}, Gmail lookback: {gmail_lookback_days}j, Rétention: {'illimitée' if retention_days == 0 else str(retention_days) + 'j'}")
+    logger.info(f"Settings — LLM: {llm_enabled}, Thinking: {thinking_enabled}, Modèles: {model_priority}, Gmail lookback: {gmail_lookback_days}j, Rétention: {'illimitée' if retention_days == 0 else str(retention_days) + 'j'}")
 
     all_sources = [doc for doc in db.collection("sources").where("active", "==", True).stream()]
     # Gmail en premier pour que les newsletters aient la priorité sur l'attribution
@@ -139,9 +138,9 @@ def run():
     else:
         # Étape 2 : traitement LLM ou brut selon settings
         if llm_enabled:
-            logger.info(f"Envoi de {len(all_raw)} article(s) à Gemini (traduction FR: {translation_enabled})...")
+            logger.info(f"Envoi de {len(all_raw)} article(s) à Gemini (bilingue FR+EN)...")
             try:
-                enriched_articles = enrich_articles_batch(all_raw, translate=translation_enabled, model_priority=model_priority, thinking=thinking_enabled)
+                enriched_articles = enrich_articles_batch(all_raw, model_priority=model_priority, thinking=thinking_enabled)
             except Exception as e:
                 logger.error(f"Tous les modèles LLM ont échoué ({e.__class__.__name__}) — sauvegarde des articles bruts sans enrichissement.")
                 enriched_articles = save_raw_articles(all_raw)

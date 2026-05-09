@@ -30,7 +30,6 @@ const RETENTION_OPTIONS = [0, 1, 2, 3, 4, 5, 6, 7, 15, 30, 90, 365];
 
 interface Settings {
   llm_enabled: boolean;
-  translation_enabled: boolean;
   thinking_enabled: boolean;
   model_priority: string[];
   gmail_lookback_days: number;
@@ -53,9 +52,7 @@ export default function AdminSettings({ token }: { token: string }) {
   };
 
   const updateBool = async (key: keyof Settings, value: boolean) => {
-    const updated = { ...settings!, [key]: value };
-    if (key === "llm_enabled" && !value) (updated as any).translation_enabled = false;
-    await updateSettings(updated as Settings);
+    await updateSettings({ ...settings!, [key]: value });
   };
 
   const updateLookback = async (days: number) => {
@@ -92,12 +89,6 @@ export default function AdminSettings({ token }: { token: string }) {
           label="Activer le traitement LLM"
           checked={settings.llm_enabled}
           onChange={(v) => updateBool("llm_enabled", v)}
-        />
-        <Toggle
-          label="Activer la traduction en français"
-          checked={settings.translation_enabled}
-          disabled={!settings.llm_enabled}
-          onChange={(v) => updateBool("translation_enabled", v)}
         />
         <Toggle
           label="Activer le mode Thinking (meilleure qualité, plus lent)"

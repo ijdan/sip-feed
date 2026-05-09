@@ -1,13 +1,15 @@
 "use client";
+import { categoryLabel } from "@/lib/categories";
 
 interface Props {
   categories: string[];
   selected: string | null;
   onChange: (cat: string | null) => void;
   counts: Record<string, number>;
+  lang?: "fr" | "en";
 }
 
-export default function CategoryFilter({ categories, selected, onChange, counts }: Props) {
+export default function CategoryFilter({ categories, selected, onChange, counts, lang = "fr" }: Props) {
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
 
   return (
@@ -20,7 +22,7 @@ export default function CategoryFilter({ categories, selected, onChange, counts 
             : "bg-white text-gray-600 border-gray-300 hover:border-gray-500"
         }`}
       >
-        Toutes {total > 0 && <span className="ml-1 opacity-70">({total})</span>}
+        {lang === "en" ? "All" : "Toutes"} {total > 0 && <span className="ml-1 opacity-70">({total})</span>}
       </button>
       {categories.map((cat) => (
         <button
@@ -32,7 +34,7 @@ export default function CategoryFilter({ categories, selected, onChange, counts 
               : "bg-white text-gray-600 border-gray-300 hover:border-gray-500"
           }`}
         >
-          {cat} {counts[cat] > 0 && <span className="ml-1 opacity-70">({counts[cat]})</span>}
+          {categoryLabel(cat, lang)} {counts[cat] > 0 && <span className="ml-1 opacity-70">({counts[cat]})</span>}
         </button>
       ))}
     </div>

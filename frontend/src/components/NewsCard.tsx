@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { categoryLabel } from "@/lib/categories";
 
 const CATEGORY_COLORS: Record<string, string> = {
   IA: "bg-purple-100 text-purple-800",
@@ -11,9 +12,25 @@ const CATEGORY_COLORS: Record<string, string> = {
   Autre: "bg-yellow-100 text-yellow-800",
 };
 
-export default function NewsCard({ article }: { article: any }) {
+interface Props {
+  article: any;
+  lang?: "fr" | "en";
+}
+
+export default function NewsCard({ article, lang = "fr" }: Props) {
   const [expanded, setExpanded] = useState(false);
   const color = CATEGORY_COLORS[article.category] ?? CATEGORY_COLORS["Autre"];
+
+  // Choisit la bonne version selon la langue, avec fallback sur les champs génériques
+  const title = lang === "en"
+    ? (article.title_en || article.title)
+    : (article.title_fr || article.title);
+  const shortDesc = lang === "en"
+    ? (article.short_description_en || article.short_description)
+    : (article.short_description_fr || article.short_description);
+  const longDesc = lang === "en"
+    ? (article.long_description_en || article.long_description)
+    : (article.long_description_fr || article.long_description);
 
   return (
     <div className="bg-white rounded-lg border p-5 shadow-sm space-y-3">
@@ -22,10 +39,10 @@ export default function NewsCard({ article }: { article: any }) {
         onClick={() => setExpanded(!expanded)}
       >
         <h2 className="text-lg font-semibold leading-snug hover:text-blue-700 transition-colors">
-          {article.title}
+          {title}
         </h2>
         <span className={`shrink-0 text-xs font-medium px-2 py-1 rounded-full ${color}`}>
-          {article.category}
+          {categoryLabel(article.category, lang)}
         </span>
       </div>
 
@@ -33,11 +50,11 @@ export default function NewsCard({ article }: { article: any }) {
         className="text-gray-600 text-sm cursor-pointer hover:text-gray-800 transition-colors"
         onClick={() => setExpanded(!expanded)}
       >
-        {article.short_description}
+        {shortDesc}
       </p>
 
-      {expanded && (
-        <p className="text-gray-700 text-sm border-t pt-3">{article.long_description}</p>
+      {expanded && longDesc && (
+        <p className="text-gray-700 text-sm border-t pt-3">{longDesc}</p>
       )}
 
       <div className="flex items-center justify-between text-xs text-gray-400 pt-1">
@@ -52,7 +69,7 @@ export default function NewsCard({ article }: { article: any }) {
           rel="noopener noreferrer"
           className="text-blue-600 font-medium hover:underline"
         >
-          Lire l'article →
+          {lang === "en" ? "Read article →" : "Lire l'article →"}
         </a>
       </div>
     </div>

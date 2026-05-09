@@ -11,8 +11,14 @@ class Article(BaseModel):
 
     id: str
     title: str
+    title_fr: str = ""
+    title_en: str = ""
     short_description: str
+    short_description_fr: str = ""
+    short_description_en: str = ""
     long_description: str
+    long_description_fr: str = ""
+    long_description_en: str = ""
     article_url: str
     source_name: str
     source_id: str

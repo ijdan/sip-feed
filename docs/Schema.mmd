@@ -1,0 +1,45 @@
+flowchart TB
+  Browser([Navigateur])
+
+  subgraph GCP["Google Cloud Platform"]
+      subgraph CR["Cloud Run"]
+          Frontend["Frontend Next.js"]
+          Backend["Backend FastAPI"]
+      end
+      subgraph CRJ["Cloud Run Jobs"]
+          Collector["Collector Python"]
+      end
+      Scheduler["Cloud Scheduler"]
+      Firestore[("Firestore")]
+      SecretMgr["Secret Manager"]
+      Registry["Artifact Registry"]
+  end
+
+  subgraph Ext["Services Google"]
+      GmailAPI["Gmail API"]
+      GeminiAPI["Gemini API"]
+      GoogleOAuth["Google OAuth"]
+  end
+
+  subgraph Web["Sources Web"]
+      HN["Hacker News"]
+      Verge["The Verge"]
+  end
+
+  Browser -->|HTTPS| Frontend
+  Frontend -->|REST JWT| Backend
+  Frontend -->|OAuth2| GoogleOAuth
+  GoogleOAuth -->|id token| Backend
+  Backend -->|gRPC| Firestore
+  Backend -->|gRPC| SecretMgr
+  Backend -->|HTTPS REST| Collector
+  Scheduler -->|HTTPS OAuth2| Collector
+  Collector -->|gRPC| Firestore
+  Collector -->|HTTPS OAuth2| GmailAPI
+  Collector -->|HTTPS API Key| GeminiAPI
+  Collector -->|HTTPS scraping| HN
+  Collector -->|HTTPS scraping| Verge
+  Registry -.->|Docker pull| CR
+  Registry -.->|Docker pull| CRJ
+  SecretMgr -.->|env vars| CR
+  SecretMgr -.->|env vars| CRJ

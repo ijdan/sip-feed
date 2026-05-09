@@ -3,8 +3,7 @@ import { useState, useEffect } from "react";
 import useSWR from "swr";
 import NewsCard from "@/components/NewsCard";
 import CategoryFilter from "@/components/CategoryFilter";
-
-const CATEGORIES = ["IA", "DevOps", "Cloud", "Sécurité", "Dev", "IT", "Autre"];
+import { CATEGORIES } from "@/lib/categories";
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
 const COLUMN_CLASSES: Record<number, string> = {
@@ -16,15 +15,23 @@ const COLUMN_CLASSES: Record<number, string> = {
 export default function FeedPage() {
   const [category, setCategory] = useState<string | null>(null);
   const [columns, setColumns] = useState<number>(1);
+  const [lang, setLang] = useState<"fr" | "en">("fr");
 
   useEffect(() => {
-    const saved = localStorage.getItem("feed-columns");
-    if (saved) setColumns(Number(saved));
+    const savedCols = localStorage.getItem("feed-columns");
+    if (savedCols) setColumns(Number(savedCols));
+    const savedLang = localStorage.getItem("feed-lang");
+    if (savedLang === "en" || savedLang === "fr") setLang(savedLang);
   }, []);
 
   const changeColumns = (n: number) => {
     setColumns(n);
     localStorage.setItem("feed-columns", String(n));
+  };
+
+  const changeLang = (l: "fr" | "en") => {
+    setLang(l);
+    localStorage.setItem("feed-lang", l);
   };
 
   const articlesUrl = `${process.env.NEXT_PUBLIC_API_URL}/articles/${category ? "?category=" + category : ""}`;
@@ -35,25 +42,40 @@ export default function FeedPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-4 flex-wrap">
         <p className="text-sm text-gray-500">
           {stats ? `${stats.total} article${stats.total > 1 ? "s" : ""}` : ""}
         </p>
-        <div className="flex items-center gap-1 border rounded-md overflow-hidden">
-          {[1, 2, 3].map((n) => (
-            <button
-              key={n}
-              onClick={() => changeColumns(n)}
-              title={`${n} colonne${n > 1 ? "s" : ""}`}
-              className={`px-3 py-1 text-sm transition ${
-                columns === n
-                  ? "bg-gray-900 text-white"
-                  : "bg-white text-gray-500 hover:bg-gray-100"
-              }`}
-            >
-              {n === 1 ? "▬" : n === 2 ? "⊟" : "⊞"}
-            </button>
-          ))}
+        <div className="flex items-center gap-2">
+          {/* Sélecteur de langue */}
+          <div className="flex border rounded-md overflow-hidden">
+            {(["fr", "en"] as const).map((l) => (
+              <button
+                key={l}
+                onClick={() => changeLang(l)}
+                className={`px-3 py-1 text-sm font-medium transition ${
+                  lang === l ? "bg-gray-900 text-white" : "bg-white text-gray-500 hover:bg-gray-100"
+                }`}
+              >
+                {l.toUpperCase()}
+              </button>
+            ))}
+          </div>
+          {/* Sélecteur de colonnes */}
+          <div className="flex border rounded-md overflow-hidden">
+            {[1, 2, 3].map((n) => (
+              <button
+                key={n}
+                onClick={() => changeColumns(n)}
+                title={`${n} colonne${n > 1 ? "s" : ""}`}
+                className={`px-3 py-1 text-sm transition ${
+                  columns === n ? "bg-gray-900 text-white" : "bg-white text-gray-500 hover:bg-gray-100"
+                }`}
+              >
+                {n === 1 ? "▬" : n === 2 ? "⊟" : "⊞"}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -62,6 +84,7 @@ export default function FeedPage() {
         selected={category}
         onChange={setCategory}
         counts={stats?.by_category ?? {}}
+        lang={lang}
       />
 
       {isLoading && <p className="text-gray-500">Chargement...</p>}
@@ -71,7 +94,7 @@ export default function FeedPage() {
 
       <div className={`grid gap-4 ${COLUMN_CLASSES[columns]}`}>
         {data?.items?.map((article: any) => (
-          <NewsCard key={article.id} article={article} />
+          <NewsCard key={article.id} article={article} lang={lang} />
         ))}
       </div>
     </div>

@@ -1,3 +1,8 @@
+# Emulateur Firestore local
+.firestore-emulator-data/
+firebase-debug.log
+firestore-debug.log
+
 # Credentials - ne jamais commiter
 **/.env
 **/gmail_token.json

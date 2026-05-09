@@ -4,6 +4,8 @@ BASE="$(cd "$(dirname "$0")" && pwd)"
 echo "Démarrage du backend (port 8000)..."
 cd "$BASE/backend"
 source venv/bin/activate
+# Utilise l'émulateur Firestore local si disponible
+export FIRESTORE_EMULATOR_HOST="localhost:8080"
 uvicorn app.main:app --reload --port 8000 &
 BACKEND_PID=$!
 

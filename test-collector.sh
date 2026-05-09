@@ -3,9 +3,14 @@ BASE="$(cd "$(dirname "$0")" && pwd)"
 cd "$BASE/collector"
 source venv/bin/activate
 
+set -a && source .env && set +a
+
+# Utilise l'émulateur Firestore local (pas la prod)
+export FIRESTORE_EMULATOR_HOST="localhost:8080"
+export GRPC_DNS_RESOLVER=native
+
 echo "Lancement du collector en local..."
-echo "(Firestore de production utilisé)"
+echo "(Émulateur Firestore local — prod NON modifiée)"
 echo ""
 
-set -a && source .env && set +a
-GRPC_DNS_RESOLVER=native python main.py
+python main.py

@@ -7,7 +7,7 @@ import Controls from "@/components/Controls";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Tech News Aggregator",
+  title: "Sip-feed",
   description: "Vos news tech, structurées et centralisées",
 };
 
@@ -19,7 +19,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <SessionProvider session={session}>
           <header style={{ backgroundColor: "var(--surface)", borderColor: "var(--border)" }}
             className="border-b px-6 py-4 flex items-center justify-between">
-            <h1 className="text-xl font-bold">Tech News</h1>
+            <h1 className="text-xl font-bold">Sip-feed</h1>
             <div className="flex items-center gap-4">
               <nav className="flex gap-4 text-sm" style={{ color: "var(--text-muted)" }}>
                 <a href="/" className="hover:underline">Feed</a>

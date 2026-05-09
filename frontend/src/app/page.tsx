@@ -18,6 +18,7 @@ export default function FeedPage() {
   const [columns, setColumns] = useState<number>(1);
   const [lang, setLang] = useState<"fr" | "en">("fr");
   const [excludedSources, setExcludedSources] = useState<Set<string>>(new Set());
+  const [dismissedList, setDismissedList] = useState<string[]>([]); // ordre LIFO pour undo
 
   useEffect(() => {
     const savedCols = localStorage.getItem("feed-columns");
@@ -26,6 +27,8 @@ export default function FeedPage() {
     if (savedLang === "en" || savedLang === "fr") setLang(savedLang);
     const savedExcluded = localStorage.getItem("feed-excluded-sources");
     if (savedExcluded) setExcludedSources(new Set(JSON.parse(savedExcluded)));
+    const savedDismissed = localStorage.getItem("feed-dismissed");
+    if (savedDismissed) setDismissedList(JSON.parse(savedDismissed));
   }, []);
 
   const changeColumns = (n: number) => {
@@ -36,6 +39,22 @@ export default function FeedPage() {
   const changeLang = (l: "fr" | "en") => {
     setLang(l);
     localStorage.setItem("feed-lang", l);
+  };
+
+  const dismissedSet = new Set(dismissedList);
+
+  const dismissArticle = (id: string) => {
+    if (dismissedSet.has(id)) return;
+    const next = [...dismissedList, id];
+    setDismissedList(next);
+    localStorage.setItem("feed-dismissed", JSON.stringify(next));
+  };
+
+  const undoDismiss = () => {
+    if (dismissedList.length === 0) return;
+    const next = dismissedList.slice(0, -1);
+    setDismissedList(next);
+    localStorage.setItem("feed-dismissed", JSON.stringify(next));
   };
 
   const toggleSource = (source: string) => {
@@ -63,7 +82,7 @@ export default function FeedPage() {
 
   // Articles filtrés (exclusion des sources désactivées)
   const filteredItems = (data?.items ?? []).filter(
-    (a: any) => !excludedSources.has(a.source_name)
+    (a: any) => !excludedSources.has(a.source_name) && !dismissedSet.has(a.id)
   );
 
   // Compteurs recalculés sur les articles visibles
@@ -80,6 +99,18 @@ export default function FeedPage() {
           {data ? `${filteredTotal} article${filteredTotal > 1 ? "s" : ""}${excludedSources.size > 0 ? ` sur ${data.total} (${excludedSources.size} source${excludedSources.size > 1 ? "s" : ""} masquée${excludedSources.size > 1 ? "s" : ""})` : ""}` : ""}
         </p>
         <div className="flex items-center gap-2">
+          {/* Undo masquage */}
+          {dismissedList.length > 0 && (
+            <button
+              onClick={undoDismiss}
+              title={`Réafficher le dernier article masqué (${dismissedList.length} masqué${dismissedList.length > 1 ? "s" : ""})`}
+              className="flex items-center gap-1 px-3 py-1 rounded-md border text-sm transition"
+              style={{ borderColor: "var(--border)", color: "var(--text-muted)", backgroundColor: "var(--surface)" }}
+            >
+              ↩ <span className="text-xs opacity-70">{dismissedList.length}</span>
+            </button>
+          )}
+
           {/* Sélecteur de langue */}
           <div className="flex border rounded-md overflow-hidden" style={{ borderColor: "var(--border)" }}>
             {(["fr", "en"] as const).map((l) => (
@@ -138,7 +169,12 @@ export default function FeedPage() {
 
       <div className={`grid gap-4 ${COLUMN_CLASSES[columns]}`}>
         {filteredItems.map((article: any) => (
-          <NewsCard key={article.id} article={article} lang={lang} />
+          <NewsCard
+            key={article.id}
+            article={article}
+            lang={lang}
+            onDismiss={() => dismissArticle(article.id)}
+          />
         ))}
       </div>
     </div>

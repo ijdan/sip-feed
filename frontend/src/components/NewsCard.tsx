@@ -1,6 +1,8 @@
 "use client";
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { categoryLabel } from "@/lib/categories";
+
+const DISMISS_THRESHOLD = 120; // px
 
 const CATEGORY_COLORS: Record<string, string> = {
   IA: "bg-purple-100 text-purple-800",
@@ -15,11 +17,36 @@ const CATEGORY_COLORS: Record<string, string> = {
 interface Props {
   article: any;
   lang?: "fr" | "en";
+  onDismiss?: () => void;
 }
 
-export default function NewsCard({ article, lang = "fr" }: Props) {
+export default function NewsCard({ article, lang = "fr", onDismiss }: Props) {
   const [expanded, setExpanded] = useState(false);
+  const [dragX, setDragX] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  const [dismissed, setDismissedAnim] = useState(false);
+  const startX = useRef(0);
   const color = CATEGORY_COLORS[article.category] ?? CATEGORY_COLORS["Autre"];
+
+  const triggerDismiss = () => {
+    setDismissedAnim(true);
+    setTimeout(() => onDismiss?.(), 250);
+  };
+
+  const onDragStart = (clientX: number) => {
+    startX.current = clientX;
+    setDragging(true);
+  };
+  const onDragMove = (clientX: number) => {
+    if (!dragging) return;
+    const delta = clientX - startX.current;
+    if (delta < 0) setDragX(delta); // swipe gauche uniquement
+  };
+  const onDragEnd = () => {
+    if (dragX < -DISMISS_THRESHOLD) triggerDismiss();
+    else setDragX(0);
+    setDragging(false);
+  };
 
   // Choisit la bonne version selon la langue, avec fallback sur les champs génériques
   const title = lang === "en"
@@ -34,9 +61,33 @@ export default function NewsCard({ article, lang = "fr" }: Props) {
 
   return (
     <div
-      style={{ backgroundColor: "var(--surface)", borderColor: "var(--border)" }}
-      className="rounded-lg border p-5 shadow-sm space-y-3 transition-colors"
+      style={{
+        backgroundColor: "var(--surface)",
+        borderColor: "var(--border)",
+        transform: dismissed ? "translateX(-110%)" : `translateX(${dragX}px)`,
+        opacity: dismissed ? 0 : Math.max(0.3, 1 + dragX / 300),
+        transition: dragging ? "none" : "transform 0.25s ease, opacity 0.25s ease",
+        cursor: dragX > 0 ? "grabbing" : "auto",
+      }}
+      className="relative rounded-lg border p-5 shadow-sm space-y-3 group select-none"
+      onTouchStart={(e) => onDragStart(e.touches[0].clientX)}
+      onTouchMove={(e) => onDragMove(e.touches[0].clientX)}
+      onTouchEnd={onDragEnd}
+      onMouseDown={(e) => onDragStart(e.clientX)}
+      onMouseMove={(e) => onDragMove(e.clientX)}
+      onMouseUp={onDragEnd}
+      onMouseLeave={() => { if (dragging) onDragEnd(); }}
     >
+      {onDismiss && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onDismiss(); }}
+          title="Masquer cet article"
+          className="absolute top-2 right-2 w-5 h-5 flex items-center justify-center rounded-full opacity-0 group-hover:opacity-100 transition-opacity text-xs"
+          style={{ color: "var(--text-muted)", backgroundColor: "var(--surface-2)" }}
+        >
+          ×
+        </button>
+      )}
       <div
         className="flex items-start justify-between gap-4 cursor-pointer"
         onClick={() => setExpanded(!expanded)}

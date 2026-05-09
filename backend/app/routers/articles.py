@@ -30,7 +30,7 @@ def list_articles(
     page_size: int = Query(20, ge=1, le=100),
 ):
     db = get_db()
-    query = db.collection("articles").order_by("collected_at", direction="DESCENDING")
+    query = db.collection("articles").order_by("published_at", direction="DESCENDING")
 
     if category:
         query = query.where("category", "==", category)

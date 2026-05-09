@@ -26,6 +26,7 @@ async function apiFetch(path: string, token: string, options: RequestInit = {}) 
 }
 
 const LOOKBACK_OPTIONS = [1, 2, 3, 5, 7, 10];
+const RETENTION_OPTIONS = [0, 1, 2, 3, 4, 5, 6, 7, 15, 30, 90, 365];
 
 interface Settings {
   llm_enabled: boolean;
@@ -33,6 +34,7 @@ interface Settings {
   thinking_enabled: boolean;
   model_priority: string[];
   gmail_lookback_days: number;
+  retention_days: number;
 }
 
 export default function AdminSettings({ token }: { token: string }) {
@@ -104,23 +106,35 @@ export default function AdminSettings({ token }: { token: string }) {
           onChange={(v) => updateBool("thinking_enabled", v)}
         />
         <div className="flex items-center justify-between gap-4">
-          <span className="text-sm text-gray-700">Récupération emails Gmail (jours)</span>
-          <div className="flex gap-1">
-            {LOOKBACK_OPTIONS.map((d) => (
-              <button
-                key={d}
-                onClick={() => updateLookback(d)}
-                disabled={saving}
-                className={`w-9 h-8 rounded text-sm border transition ${
-                  settings.gmail_lookback_days === d
-                    ? "bg-gray-900 text-white border-gray-900"
-                    : "bg-white text-gray-600 border-gray-300 hover:border-gray-500"
-                } disabled:opacity-50`}
-              >
-                {d}
-              </button>
+          <span className="text-sm text-gray-700">Rétention des articles (scheduler)</span>
+          <select
+            value={settings.retention_days}
+            onChange={(e) => updateSettings({ ...settings!, retention_days: Number(e.target.value) })}
+            disabled={saving}
+            className="border rounded px-3 py-1 text-sm text-gray-700 bg-white disabled:opacity-50"
+          >
+            {RETENTION_OPTIONS.map((d) => (
+              <option key={d} value={d}>
+                {d === 0 ? "Illimitée" : d === 1 ? "1 jour" : `${d} jours`}
+              </option>
             ))}
-          </div>
+          </select>
+        </div>
+
+        <div className="flex items-center justify-between gap-4">
+          <span className="text-sm text-gray-700">Récupération emails Gmail (jours)</span>
+          <select
+            value={settings.gmail_lookback_days}
+            onChange={(e) => updateLookback(Number(e.target.value))}
+            disabled={saving}
+            className="border rounded px-3 py-1 text-sm text-gray-700 bg-white disabled:opacity-50"
+          >
+            {LOOKBACK_OPTIONS.map((d) => (
+              <option key={d} value={d}>
+                {d} jour{d > 1 ? "s" : ""}
+              </option>
+            ))}
+          </select>
         </div>
       </div>
 

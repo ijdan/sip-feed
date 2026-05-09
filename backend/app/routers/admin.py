@@ -33,6 +33,7 @@ class GlobalSettings(BaseModel):
     thinking_enabled: bool = True
     model_priority: list[str] = DEFAULT_MODEL_PRIORITY
     gmail_lookback_days: int = 1
+    retention_days: int = 0
 
 
 def _get_access_token() -> str:

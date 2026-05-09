@@ -4,6 +4,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 os.environ.setdefault("GRPC_DNS_RESOLVER", "native")
+# Requis par google-auth pour éviter le warning "No project ID could be determined"
+_project = os.environ.get("FIRESTORE_PROJECT_ID", "tech-news-aggregator-001")
+os.environ.setdefault("GOOGLE_CLOUD_PROJECT", _project)
 
 from google.cloud import firestore
 
@@ -51,6 +54,26 @@ def already_exists(url: str) -> bool:
     return len(docs) > 0
 
 
+def apply_retention(retention_days: int) -> int:
+    """Supprime les articles plus anciens que retention_days. Retourne le nombre supprimé."""
+    if retention_days <= 0:
+        return 0
+    from datetime import datetime as _dt, timedelta
+    cutoff = (_dt.utcnow() - timedelta(days=retention_days)).isoformat()
+    docs = list(db.collection("articles").where("collected_at", "<", cutoff).stream())
+    if not docs:
+        return 0
+    batch = db.batch()
+    for i, doc in enumerate(docs):
+        batch.delete(doc.reference)
+        if (i + 1) % 500 == 0:
+            batch.commit()
+            batch = db.batch()
+    batch.commit()
+    logger.info(f"Rétention : {len(docs)} article(s) supprimé(s) (plus anciens que {retention_days}j)")
+    return len(docs)
+
+
 def run():
     global_settings = get_global_settings()
     llm_enabled = global_settings.get("llm_enabled", True)
@@ -58,7 +81,8 @@ def run():
     thinking_enabled = global_settings.get("thinking_enabled", True) and llm_enabled
     model_priority = global_settings.get("model_priority", DEFAULT_MODEL_PRIORITY)
     gmail_lookback_days = global_settings.get("gmail_lookback_days", 1)
-    logger.info(f"Settings — LLM: {llm_enabled}, Traduction FR: {translation_enabled}, Thinking: {thinking_enabled}, Modèles: {model_priority}, Gmail lookback: {gmail_lookback_days}j")
+    retention_days = global_settings.get("retention_days", 0)
+    logger.info(f"Settings — LLM: {llm_enabled}, Traduction FR: {translation_enabled}, Thinking: {thinking_enabled}, Modèles: {model_priority}, Gmail lookback: {gmail_lookback_days}j, Rétention: {'illimitée' if retention_days == 0 else str(retention_days) + 'j'}")
 
     all_sources = [doc for doc in db.collection("sources").where("active", "==", True).stream()]
     # Gmail en premier pour que les newsletters aient la priorité sur l'attribution
@@ -108,8 +132,10 @@ def run():
         except Exception as e:
             logger.error(f"Erreur source {source['name']}: {e}")
 
+    articles_collected = 0
+
     if not all_raw:
-        logger.info("Aucun nouvel article à traiter.")
+        logger.info("Aucun nouvel article à traiter — rétention non appliquée.")
     else:
         # Étape 2 : traitement LLM ou brut selon settings
         if llm_enabled:
@@ -128,7 +154,11 @@ def run():
             db.collection("articles").document(article["id"]).set(article)
             logger.info(f"  Sauvegardé : {article['title'][:60]}")
 
-        logger.info(f"Collecte web terminée — {len(enriched_articles)} article(s) ajouté(s).")
+        articles_collected = len(enriched_articles)
+        logger.info(f"Collecte terminée — {articles_collected} article(s) ajouté(s).")
+
+        # Rétention : nettoyage des anciens articles (seulement si nouveaux articles trouvés)
+        apply_retention(retention_days)
 
     # Rapport de synthèse via LLM — toujours généré
     run_logs = "\n".join(_mem_handler.records)

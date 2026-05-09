@@ -17,14 +17,24 @@ export default function NewsCard({ article }: { article: any }) {
 
   return (
     <div className="bg-white rounded-lg border p-5 shadow-sm space-y-3">
-      <div className="flex items-start justify-between gap-4">
-        <h2 className="text-lg font-semibold leading-snug">{article.title}</h2>
+      <div
+        className="flex items-start justify-between gap-4 cursor-pointer"
+        onClick={() => setExpanded(!expanded)}
+      >
+        <h2 className="text-lg font-semibold leading-snug hover:text-blue-700 transition-colors">
+          {article.title}
+        </h2>
         <span className={`shrink-0 text-xs font-medium px-2 py-1 rounded-full ${color}`}>
           {article.category}
         </span>
       </div>
 
-      <p className="text-gray-600 text-sm">{article.short_description}</p>
+      <p
+        className="text-gray-600 text-sm cursor-pointer hover:text-gray-800 transition-colors"
+        onClick={() => setExpanded(!expanded)}
+      >
+        {article.short_description}
+      </p>
 
       {expanded && (
         <p className="text-gray-700 text-sm border-t pt-3">{article.long_description}</p>
@@ -36,22 +46,14 @@ export default function NewsCard({ article }: { article: any }) {
           <span>·</span>
           <span>{new Date(article.published_at).toLocaleDateString("fr-FR")}</span>
         </div>
-        <div className="flex gap-3">
-          <button
-            onClick={() => setExpanded(!expanded)}
-            className="text-blue-500 hover:underline"
-          >
-            {expanded ? "Réduire" : "En savoir plus"}
-          </button>
-          <a
-            href={article.article_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-blue-600 font-medium hover:underline"
-          >
-            Lire l'article →
-          </a>
-        </div>
+        <a
+          href={article.article_url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-blue-600 font-medium hover:underline"
+        >
+          Lire l'article →
+        </a>
       </div>
     </div>
   );

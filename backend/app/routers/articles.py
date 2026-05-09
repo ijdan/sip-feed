@@ -27,7 +27,7 @@ def list_articles(
     category: str | None = Query(None),
     source_id: str | None = Query(None),
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    page_size: int = Query(20, ge=1, le=500),
 ):
     db = get_db()
     query = db.collection("articles").order_by("published_at", direction="DESCENDING")

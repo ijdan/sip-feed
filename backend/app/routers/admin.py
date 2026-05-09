@@ -13,7 +13,24 @@ from app.config import settings
 
 # Chemin vers le collector (relatif au projet)
 COLLECTOR_DIR = Path(__file__).resolve().parents[3] / "collector"
-IS_LOCAL = bool(os.environ.get("FIRESTORE_EMULATOR_HOST"))
+IS_LOCAL = os.environ.get("APP_ENV") == "local"
+
+
+def _check_emulator_reachable():
+    """Bloque les opérations destructives si l'émulateur n'est pas joignable."""
+    if not IS_LOCAL:
+        return  # en prod, pas de restriction
+    import socket
+    try:
+        host = os.environ.get("FIRESTORE_EMULATOR_HOST", "localhost:8080").split(":")[0]
+        port = int(os.environ.get("FIRESTORE_EMULATOR_HOST", "localhost:8080").split(":")[1])
+        with socket.create_connection((host, port), timeout=1):
+            pass
+    except Exception:
+        raise HTTPException(
+            status_code=503,
+            detail="⛔ Émulateur Firestore non disponible. Lance './start-emulator.sh' avant de continuer — la production est protégée."
+        )
 
 router = APIRouter()
 
@@ -76,6 +93,7 @@ def update_settings(payload: GlobalSettings, _: dict = Depends(require_admin)):
 
 @router.post("/purge", status_code=204)
 def purge_articles(_: dict = Depends(require_admin)):
+    _check_emulator_reachable()
     db = get_db()
     batch = db.batch()
     docs = list(db.collection("articles").stream())
@@ -135,6 +153,7 @@ def _trigger_job(source_id: str | None = None) -> dict:
 @router.post("/collect", status_code=202)
 def trigger_collection(_: dict = Depends(require_admin)):
     if IS_LOCAL:
+        _check_emulator_reachable()
         return _trigger_local()
     try:
         return _trigger_job()
@@ -149,6 +168,7 @@ def collect_single_source(source_id: str, _: dict = Depends(require_admin)):
     if not db.collection("sources").document(source_id).get().exists:
         raise HTTPException(status_code=404, detail="Source introuvable")
     if IS_LOCAL:
+        _check_emulator_reachable()
         return _trigger_local(source_id=source_id)
     try:
         return _trigger_job(source_id=source_id)

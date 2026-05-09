@@ -46,16 +46,20 @@ export default function FeedPage() {
     localStorage.setItem("feed-excluded-sources", JSON.stringify(Array.from(next)));
   };
 
-  const articlesUrl = `${process.env.NEXT_PUBLIC_API_URL}/articles/${category ? "?category=" + category : ""}`;
+  const articlesUrl = `${process.env.NEXT_PUBLIC_API_URL}/articles/?page_size=500${category ? "&category=" + category : ""}`;
   const statsUrl = `${process.env.NEXT_PUBLIC_API_URL}/articles/stats`;
 
   const { data, isLoading } = useSWR(articlesUrl, fetcher);
   const { data: stats } = useSWR(statsUrl, fetcher);
 
-  // Sources uniques présentes dans les articles
-  const availableSources: string[] = data?.items
-    ? Array.from(new Set<string>(data.items.map((a: any) => a.source_name))).sort()
-    : [];
+  // Sources uniques avec leurs compteurs
+  const sourceCountsAll: Record<string, number> = (data?.items ?? []).reduce(
+    (acc: Record<string, number>, a: any) => {
+      acc[a.source_name] = (acc[a.source_name] ?? 0) + 1;
+      return acc;
+    }, {}
+  );
+  const availableSources: string[] = Object.keys(sourceCountsAll).sort();
 
   // Articles filtrés (exclusion des sources désactivées)
   const filteredItems = (data?.items ?? []).filter(
@@ -73,7 +77,7 @@ export default function FeedPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <p className="text-sm" style={{ color: "var(--text-muted)" }}>
-          {data ? `${filteredTotal} article${filteredTotal > 1 ? "s" : ""}${excludedSources.size > 0 ? ` (${excludedSources.size} source${excludedSources.size > 1 ? "s" : ""} masquée${excludedSources.size > 1 ? "s" : ""})` : ""}` : ""}
+          {data ? `${filteredTotal} article${filteredTotal > 1 ? "s" : ""}${excludedSources.size > 0 ? ` sur ${data.total} (${excludedSources.size} source${excludedSources.size > 1 ? "s" : ""} masquée${excludedSources.size > 1 ? "s" : ""})` : ""}` : ""}
         </p>
         <div className="flex items-center gap-2">
           {/* Sélecteur de langue */}
@@ -114,6 +118,7 @@ export default function FeedPage() {
 
       <SourceFilter
         sources={availableSources}
+        counts={sourceCountsAll}
         excluded={excludedSources}
         onToggle={toggleSource}
       />

@@ -2,11 +2,12 @@
 
 interface Props {
   sources: string[];
+  counts: Record<string, number>;
   excluded: Set<string>;
   onToggle: (source: string) => void;
 }
 
-export default function SourceFilter({ sources, excluded, onToggle }: Props) {
+export default function SourceFilter({ sources, counts, excluded, onToggle }: Props) {
   if (sources.length === 0) return null;
 
   return (
@@ -27,7 +28,7 @@ export default function SourceFilter({ sources, excluded, onToggle }: Props) {
               : { backgroundColor: "transparent", color: "var(--text-muted)", borderColor: "var(--border)", textDecoration: "line-through", opacity: 0.5 }
             }
           >
-            {source}
+            {source}{counts[source] ? <span className="ml-1 opacity-60">({counts[source]})</span> : null}
           </button>
         );
       })}

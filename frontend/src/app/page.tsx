@@ -54,7 +54,7 @@ export default function FeedPage() {
 
   // Sources uniques présentes dans les articles
   const availableSources: string[] = data?.items
-    ? [...new Set<string>(data.items.map((a: any) => a.source_name))].sort()
+    ? Array.from(new Set<string>(data.items.map((a: any) => a.source_name))).sort()
     : [];
 
   // Articles filtrés (exclusion des sources désactivées)

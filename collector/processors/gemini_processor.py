@@ -39,6 +39,8 @@ Version anglaise :
 - Style concis à l'américaine (WSJ, TechCrunch)
 - Reformule le titre si trop technique pour un public large
 
+Le contenu peut être en anglais ou en français — adapte-toi à la langue source.
+
 Pour chaque article, produis exactement ces champs :
 - "title_fr" (max 12 mots) : titre percutant en français
 - "title_en" (max 12 mots) : titre journalistique en anglais
@@ -62,8 +64,8 @@ def enrich_articles_batch(raw_articles: list[dict], model_priority: list[str] | 
     for i, raw in enumerate(raw_articles):
         articles_text += (
             f"[{i}]\n"
-            f"TITRE_EN: {raw['title']}\n"
-            f"CONTENU_EN: {raw.get('raw_content', '')[:1500]}\n\n"
+            f"TITRE: {raw['title']}\n"
+            f"CONTENU: {raw.get('raw_content', '')[:1500]}\n\n"
         )
 
     prompt = BATCH_PROMPT_BILINGUAL.format(

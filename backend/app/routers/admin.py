@@ -30,6 +30,7 @@ DEFAULT_MODEL_PRIORITY = [
 class GlobalSettings(BaseModel):
     llm_enabled: bool = True
     translation_enabled: bool = True
+    thinking_enabled: bool = True
     model_priority: list[str] = DEFAULT_MODEL_PRIORITY
     gmail_lookback_days: int = 1
 

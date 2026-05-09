@@ -30,6 +30,7 @@ const LOOKBACK_OPTIONS = [1, 2, 3, 5, 7, 10];
 interface Settings {
   llm_enabled: boolean;
   translation_enabled: boolean;
+  thinking_enabled: boolean;
   model_priority: string[];
   gmail_lookback_days: number;
 }
@@ -95,6 +96,12 @@ export default function AdminSettings({ token }: { token: string }) {
           checked={settings.translation_enabled}
           disabled={!settings.llm_enabled}
           onChange={(v) => updateBool("translation_enabled", v)}
+        />
+        <Toggle
+          label="Activer le mode Thinking (meilleure qualité, plus lent)"
+          checked={settings.thinking_enabled}
+          disabled={!settings.llm_enabled}
+          onChange={(v) => updateBool("thinking_enabled", v)}
         />
         <div className="flex items-center justify-between gap-4">
           <span className="text-sm text-gray-700">Récupération emails Gmail (jours)</span>

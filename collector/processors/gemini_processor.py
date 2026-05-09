@@ -66,7 +66,7 @@ Réponds UNIQUEMENT avec un tableau JSON valide de {count} objets :
 """
 
 
-def enrich_articles_batch(raw_articles: list[dict], translate: bool = True, model_priority: list[str] | None = None) -> list[dict]:
+def enrich_articles_batch(raw_articles: list[dict], translate: bool = True, model_priority: list[str] | None = None, thinking: bool = True) -> list[dict]:
     """Traite tous les articles en un seul appel Gemini, avec fallback sur les modèles suivants."""
     articles_text = ""
     for i, raw in enumerate(raw_articles):
@@ -84,7 +84,7 @@ def enrich_articles_batch(raw_articles: list[dict], translate: bool = True, mode
     )
 
     models_to_try = model_priority or DEFAULT_MODEL_PRIORITY
-    text = _call_llm(prompt, models_to_try)
+    text = _call_llm(prompt, models_to_try, thinking=thinking)
 
     if text.startswith("```"):
         text = text.split("```")[1]
@@ -149,30 +149,33 @@ Réponds UNIQUEMENT avec un tableau JSON valide. Si aucun lien pertinent, retour
 """
 
 
-GENERATION_CONFIG = {
+BASE_GENERATION_CONFIG = {
     "temperature": 0.4,
     "max_output_tokens": 60000,
     "response_mime_type": "application/json",
 }
 
-THINKING_CONFIG = {"thinking_budget": 0}
 
-
-def _call_llm(prompt: str, models_to_try: list[str]) -> str:
+def _call_llm(prompt: str, models_to_try: list[str], thinking: bool = True) -> str:
     """Appelle le LLM en cascade jusqu'au premier modèle disponible."""
     import logging
     logger = logging.getLogger(__name__)
+
+    # thinking_budget: -1 = auto (modèle décide), 0 = désactivé
+    thinking_config = {"thinking_budget": -1 if thinking else 0}
+    logger.debug(f"Thinking mode : {'activé (auto)' if thinking else 'désactivé'}")
+
     last_error = None
     for model_name in models_to_try:
         try:
             logger.debug(f"Essai modèle : {model_name}")
-            # thinking_budget disponible sur Gemini 2.5+
             try:
-                config = {**GENERATION_CONFIG, "thinking_config": THINKING_CONFIG}
+                config = {**BASE_GENERATION_CONFIG, "thinking_config": thinking_config}
                 m = genai.GenerativeModel(model_name, generation_config=config)
                 response = m.generate_content(prompt)
             except Exception:
-                m = genai.GenerativeModel(model_name, generation_config=GENERATION_CONFIG)
+                # Fallback sans thinking si le modèle ne le supporte pas
+                m = genai.GenerativeModel(model_name, generation_config=BASE_GENERATION_CONFIG)
                 response = m.generate_content(prompt)
             text = response.text.strip()
             if text.startswith("```"):

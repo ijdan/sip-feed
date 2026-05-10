@@ -7,6 +7,7 @@ import NewsCard from "@/components/NewsCard";
 import DropdownFilter, { FilterItem } from "@/components/DropdownFilter";
 import RadioFilter from "@/components/RadioFilter";
 import SearchBar from "@/components/SearchBar";
+import TrashCard from "@/components/TrashCard";
 import { CATEGORIES, categoryLabel } from "@/lib/categories";
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
@@ -26,8 +27,9 @@ export default function FeedPage() {
   const {
     favorites, readingList, readArticles,
     dismissedList, dismissedSet,
-    toggleFavorite, toggleReadingList, toggleRead, dismiss, undoDismiss,
+    toggleFavorite, toggleReadingList, toggleRead, dismiss, restoreArticle,
   } = usePreferences();
+  const [trashOpen, setTrashOpen] = useState(false);
   const [filterFavorites, setFilterFavorites] = useState(false);
   const [filterReading, setFilterReading] = useState(false);
   const [searchTerms, setSearchTerms] = useState<string[]>([]);
@@ -122,7 +124,7 @@ export default function FeedPage() {
 
   const filteredTotal = filteredItems.length;
   const totalAll = data?.total ?? 0;
-  const hasFilters = excludedSources.size > 0 || selectedCategory !== null || filterFavorites || filterReading;
+  const hasFilters = excludedSources.size > 0 || selectedCategory !== null || filterFavorites || filterReading || searchTerms.length > 0;
 
   return (
     <div className="space-y-4">
@@ -132,12 +134,16 @@ export default function FeedPage() {
         <div className="flex items-center gap-2 text-sm" style={{ color: "var(--text-muted)" }}>
           {dismissedList.length > 0 && (
             <button
-              onClick={undoDismiss}
-              title={`Réafficher le dernier article masqué (${dismissedList.length})`}
+              onClick={() => setTrashOpen(o => !o)}
+              title={`Corbeille (${dismissedList.length} article${dismissedList.length > 1 ? "s" : ""})`}
               className="flex items-center gap-1 px-2 py-1 rounded-md border text-sm transition"
-              style={{ borderColor: "var(--border)", backgroundColor: "var(--surface)" }}
+              style={{
+                borderColor: trashOpen ? "var(--accent)" : "var(--border)",
+                backgroundColor: trashOpen ? "var(--accent)" : "var(--surface)",
+                color: trashOpen ? "var(--bg)" : "var(--text)",
+              }}
             >
-              ↩ <span className="text-xs opacity-70">{dismissedList.length}</span>
+              🗑️ <span className="text-xs opacity-80">{dismissedList.length}</span>
             </button>
           )}
           <span>
@@ -249,29 +255,57 @@ export default function FeedPage() {
       </div>
 
       {/* Feed */}
-      {isLoading && <p style={{ color: "var(--text-muted)" }}>Chargement…</p>}
-      {!isLoading && filteredItems.length === 0 && (
-        <p className="text-sm" style={{ color: "var(--text-muted)" }}>
-          Aucun article — ajuste les filtres ou réaffiche des sources.
-        </p>
+      {trashOpen ? (
+        /* Vue corbeille */
+        <div className="space-y-3">
+          <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+            {dismissedList.length} article{dismissedList.length > 1 ? "s" : ""} supprimé{dismissedList.length > 1 ? "s" : ""} — balayez droite→gauche pour restaurer.
+          </p>
+          {dismissedList.length === 0 && (
+            <p className="text-sm" style={{ color: "var(--text-muted)" }}>La corbeille est vide.</p>
+          )}
+          <div className="space-y-3">
+            {dismissedList.map(id => {
+              const article = (data?.items ?? []).find((a: any) => a.id === id);
+              if (!article) return null;
+              return (
+                <TrashCard
+                  key={id}
+                  article={article}
+                  lang={lang}
+                  onRestore={() => restoreArticle(id)}
+                />
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+        /* Vue feed normale */
+        <>
+          {isLoading && <p style={{ color: "var(--text-muted)" }}>Chargement…</p>}
+          {!isLoading && filteredItems.length === 0 && (
+            <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+              Aucun article — ajuste les filtres ou réaffiche des sources.
+            </p>
+          )}
+          <div className={`grid gap-4 ${COLUMN_CLASSES[columns]}`}>
+            {filteredItems.map((article: any) => (
+              <NewsCard
+                key={article.id}
+                article={article}
+                lang={lang}
+                onDismiss={() => dismiss(article.id)}
+                onFavorite={() => toggleFavorite(article.id)}
+                onReadingList={() => toggleReadingList(article.id)}
+                onMarkRead={() => toggleRead(article.id)}
+                isFavorite={favorites.has(article.id)}
+                isInReadingList={readingList.has(article.id)}
+                isRead={readArticles.has(article.id)}
+              />
+            ))}
+          </div>
+        </>
       )}
-
-      <div className={`grid gap-4 ${COLUMN_CLASSES[columns]}`}>
-        {filteredItems.map((article: any) => (
-          <NewsCard
-            key={article.id}
-            article={article}
-            lang={lang}
-            onDismiss={() => dismiss(article.id)}
-            onFavorite={() => toggleFavorite(article.id)}
-            onReadingList={() => toggleReadingList(article.id)}
-            onMarkRead={() => toggleRead(article.id)}
-            isFavorite={favorites.has(article.id)}
-            isInReadingList={readingList.has(article.id)}
-            isRead={readArticles.has(article.id)}
-          />
-        ))}
-      </div>
     </div>
   );
 }

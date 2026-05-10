@@ -154,10 +154,16 @@ export function usePreferences() {
     persist(state.current.favorites, state.current.readingList, state.current.readArticles, next);
   }, [persist]);
 
+  const restoreArticle = useCallback((id: string) => {
+    const next = state.current.dismissedList.filter(x => x !== id);
+    setDismissedList(next);
+    persist(state.current.favorites, state.current.readingList, state.current.readArticles, next);
+  }, [persist]);
+
   return {
     favorites, readingList, readArticles,
     dismissedList, dismissedSet: new Set(dismissedList),
-    toggleFavorite, toggleReadingList, toggleRead, dismiss, undoDismiss,
+    toggleFavorite, toggleReadingList, toggleRead, dismiss, undoDismiss, restoreArticle,
     loaded,
   };
 }

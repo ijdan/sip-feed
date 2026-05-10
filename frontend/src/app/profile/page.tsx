@@ -56,7 +56,12 @@ export default function ProfilePage() {
         <button onClick={() => signIn("google")}
           className="px-6 py-2 rounded font-medium transition"
           style={{ backgroundColor: "var(--text)", color: "var(--bg)" }}>
-          Se connecter avec Google
+          🔵 Se connecter avec Google
+        </button>
+        <button onClick={() => signIn("github")}
+          className="px-6 py-2 rounded font-medium transition border"
+          style={{ borderColor: "var(--border)", color: "var(--text)", backgroundColor: "var(--surface)" }}>
+          🐙 Se connecter avec GitHub
         </button>
       </div>
     );

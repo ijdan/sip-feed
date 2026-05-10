@@ -67,7 +67,7 @@ for SERVICE in "${SERVICES[@]}"; do
           --platform=managed \
           --allow-unauthenticated \
           --set-env-vars="NEXTAUTH_URL=https://frontend-o3hq6ak3ka-ew.a.run.app" \
-          --set-secrets="GOOGLE_CLIENT_ID=GOOGLE_CLIENT_ID:latest,GOOGLE_CLIENT_SECRET=GOOGLE_CLIENT_SECRET:latest,NEXTAUTH_SECRET=NEXTAUTH_SECRET:latest" \
+          --set-secrets="GOOGLE_CLIENT_ID=GOOGLE_CLIENT_ID:latest,GOOGLE_CLIENT_SECRET=GOOGLE_CLIENT_SECRET:latest,NEXTAUTH_SECRET=NEXTAUTH_SECRET:latest,GITHUB_CLIENT_ID=GITHUB_CLIENT_ID:latest,GITHUB_CLIENT_SECRET=GITHUB_CLIENT_SECRET:latest" \
           --project=$PROJECT
       ;;
 

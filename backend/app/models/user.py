@@ -6,7 +6,21 @@ Role = Literal["admin", "reader"]
 
 
 class User(BaseModel):
-    id: str
+    internal_id: str       # identifiant interne stable (usr_xxxx)
     email: str
-    role: Role
-    created_at: datetime
+    name: str = ""
+    avatar: str = ""
+    role: Role = "reader"
+    provider: str = "google"
+    created_at: str
+
+
+class UserUpdate(BaseModel):
+    name: str | None = None
+
+
+class UserPreferences(BaseModel):
+    favorites: list[str] = []
+    reading_list: list[str] = []
+    read_articles: list[str] = []
+    dismissed: list[str] = []

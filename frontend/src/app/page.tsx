@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import useSWR from "swr";
+import { usePreferences } from "@/lib/usePreferences";
 import NewsCard from "@/components/NewsCard";
 import DropdownFilter, { FilterItem } from "@/components/DropdownFilter";
 import RadioFilter from "@/components/RadioFilter";
@@ -19,10 +20,11 @@ export default function FeedPage() {
   const [lang, setLang] = useState<"fr" | "en">("fr");
   const [excludedSources, setExcludedSources] = useState<Set<string>>(new Set());
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
-  const [dismissedList, setDismissedList] = useState<string[]>([]);
-  const [favorites, setFavorites] = useState<Set<string>>(new Set());
-  const [readingList, setReadingList] = useState<Set<string>>(new Set());
-  const [readArticles, setReadArticles] = useState<Set<string>>(new Set());
+  const {
+    favorites, readingList, readArticles,
+    dismissedList, dismissedSet,
+    toggleFavorite, toggleReadingList, toggleRead, dismiss, undoDismiss,
+  } = usePreferences();
   const [filterFavorites, setFilterFavorites] = useState(false);
   const [filterReading, setFilterReading] = useState(false);
 
@@ -35,14 +37,6 @@ export default function FeedPage() {
     if (savedExcSrc) setExcludedSources(new Set(JSON.parse(savedExcSrc)));
     const savedCat = localStorage.getItem("feed-selected-category");
     if (savedCat) setSelectedCategory(savedCat);
-    const savedDismissed = localStorage.getItem("feed-dismissed");
-    if (savedDismissed) setDismissedList(JSON.parse(savedDismissed));
-    const savedFav = localStorage.getItem("feed-favorites");
-    if (savedFav) setFavorites(new Set(JSON.parse(savedFav)));
-    const savedRL = localStorage.getItem("feed-reading-list");
-    if (savedRL) setReadingList(new Set(JSON.parse(savedRL)));
-    const savedRead = localStorage.getItem("feed-read-articles");
-    if (savedRead) setReadArticles(new Set(JSON.parse(savedRead)));
   }, []);
 
   const changeColumns = (n: number) => {
@@ -68,56 +62,6 @@ export default function FeedPage() {
     else localStorage.removeItem("feed-selected-category");
   };
 
-  const dismissedSet = new Set(dismissedList);
-
-  const dismissArticle = (id: string) => {
-    if (dismissedSet.has(id)) return;
-    const next = [...dismissedList, id];
-    setDismissedList(next);
-    localStorage.setItem("feed-dismissed", JSON.stringify(next));
-
-    // Retirer des favoris si présent
-    if (favorites.has(id)) {
-      const nextFav = new Set(favorites);
-      nextFav.delete(id);
-      setFavorites(nextFav);
-      localStorage.setItem("feed-favorites", JSON.stringify(Array.from(nextFav)));
-    }
-    // Retirer de la liste de lecture si présent
-    if (readingList.has(id)) {
-      const nextRL = new Set(readingList);
-      nextRL.delete(id);
-      setReadingList(nextRL);
-      localStorage.setItem("feed-reading-list", JSON.stringify(Array.from(nextRL)));
-    }
-  };
-
-  const undoDismiss = () => {
-    const next = dismissedList.slice(0, -1);
-    setDismissedList(next);
-    localStorage.setItem("feed-dismissed", JSON.stringify(next));
-  };
-
-  const toggleFavorite = (id: string) => {
-    const next = new Set(favorites);
-    next.has(id) ? next.delete(id) : next.add(id);
-    setFavorites(next);
-    localStorage.setItem("feed-favorites", JSON.stringify(Array.from(next)));
-  };
-
-  const toggleRead = (id: string) => {
-    const next = new Set(readArticles);
-    next.has(id) ? next.delete(id) : next.add(id);
-    setReadArticles(next);
-    localStorage.setItem("feed-read-articles", JSON.stringify(Array.from(next)));
-  };
-
-  const toggleReadingList = (id: string) => {
-    const next = new Set(readingList);
-    next.has(id) ? next.delete(id) : next.add(id);
-    setReadingList(next);
-    localStorage.setItem("feed-reading-list", JSON.stringify(Array.from(next)));
-  };
 
 
   const articlesUrl = `${process.env.NEXT_PUBLIC_API_URL}/articles/?page_size=500`;
@@ -267,7 +211,7 @@ export default function FeedPage() {
             key={article.id}
             article={article}
             lang={lang}
-            onDismiss={() => dismissArticle(article.id)}
+            onDismiss={() => dismiss(article.id)}
             onFavorite={() => toggleFavorite(article.id)}
             onReadingList={() => toggleReadingList(article.id)}
             onMarkRead={() => toggleRead(article.id)}

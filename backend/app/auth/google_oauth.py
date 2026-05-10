@@ -1,3 +1,4 @@
+import uuid
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from google.oauth2 import id_token
@@ -12,9 +13,13 @@ router = APIRouter()
 bearer_scheme = HTTPBearer()
 
 
-def create_jwt(user_id: str, email: str, role: str = "reader") -> str:
+def _make_internal_id() -> str:
+    return "usr_" + uuid.uuid4().hex[:12]
+
+
+def create_jwt(internal_id: str, email: str, role: str = "reader") -> str:
     payload = {
-        "sub": user_id,
+        "sub": internal_id,   # identifiant interne stable
         "email": email,
         "role": role,
         "exp": datetime.utcnow() + timedelta(minutes=settings.jwt_expire_minutes),
@@ -44,7 +49,7 @@ def require_admin(current_user: dict = Depends(verify_jwt)) -> dict:
 
 @router.post("/google")
 async def google_login(token: dict):
-    """Reçoit un id_token Google depuis le frontend et retourne un JWT applicatif."""
+    """Reçoit un id_token Google, crée ou met à jour l'utilisateur (clé = email)."""
     try:
         id_info = id_token.verify_oauth2_token(
             token["credential"],
@@ -54,22 +59,41 @@ async def google_login(token: dict):
     except ValueError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token Google invalide")
 
-    user_id = id_info["sub"]
     email = id_info["email"]
+    name = id_info.get("name", "")
+    avatar = id_info.get("picture", "")
 
     db = get_db()
-    user_ref = db.collection("users").document(user_id)
+    # Clé = email (stable quel que soit le provider)
+    user_ref = db.collection("users").document(email)
     user_doc = user_ref.get()
 
     if not user_doc.exists:
+        internal_id = _make_internal_id()
         user_ref.set({
+            "internal_id": internal_id,
             "email": email,
+            "name": name,
+            "avatar": avatar,
             "role": "reader",
+            "provider": "google",
             "created_at": datetime.utcnow().isoformat(),
         })
         role = "reader"
     else:
-        role = user_doc.to_dict().get("role", "reader")
+        data = user_doc.to_dict()
+        internal_id = data.get("internal_id") or _make_internal_id()
+        role = data.get("role", "reader")
+        # Mise à jour des infos Google si changées
+        updates = {}
+        if not data.get("internal_id"):
+            updates["internal_id"] = internal_id
+        if name and data.get("name") != name:
+            updates["name"] = name
+        if avatar and data.get("avatar") != avatar:
+            updates["avatar"] = avatar
+        if updates:
+            user_ref.update(updates)
 
-    jwt_token = create_jwt(user_id, email, role)
+    jwt_token = create_jwt(internal_id, email, role)
     return {"access_token": jwt_token, "role": role}

@@ -37,16 +37,23 @@ export default function BurgerMenu() {
             style={{ color: "var(--text)" }}>
             📰 Feed
           </Link>
-          <Link href="/admin" onClick={() => setOpen(false)}
-            className="flex items-center gap-2 px-4 py-2.5 text-sm transition hover:opacity-70"
-            style={{ color: "var(--text)" }}>
-            ⚙️ Admin
-          </Link>
+          {(session as any)?.role === "admin" && (
+            <Link href="/admin" onClick={() => setOpen(false)}
+              className="flex items-center gap-2 px-4 py-2.5 text-sm transition hover:opacity-70"
+              style={{ color: "var(--text)" }}>
+              ⚙️ Admin
+            </Link>
+          )}
 
           <div className="my-1 border-t" style={{ borderColor: "var(--border)" }} />
 
           {status === "authenticated" && (
             <>
+              <Link href="/profile" onClick={() => setOpen(false)}
+                className="flex items-center gap-2 px-4 py-2.5 text-sm transition hover:opacity-70"
+                style={{ color: "var(--text)" }}>
+                👤 Profil
+              </Link>
               {session?.user?.email && (
                 <div className="px-4 py-1.5 text-xs truncate" style={{ color: "var(--text-muted)" }}>
                   {session.user.email}

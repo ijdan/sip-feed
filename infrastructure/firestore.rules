@@ -12,8 +12,8 @@ service cloud.firestore {
     }
 
     match /articles/{articleId} {
-      allow read: if isAuthenticated();
-      allow write: if false; // écriture uniquement via le collector (service account)
+      allow read: if true; // feed public
+      allow write: if false;
     }
 
     match /sources/{sourceId} {
@@ -22,8 +22,22 @@ service cloud.firestore {
     }
 
     match /users/{userId} {
-      allow read: if isAuthenticated() && request.auth.uid == userId;
-      allow write: if false; // création via le backend uniquement
+      allow read: if isAuthenticated();
+      allow write: if false; // via backend uniquement
+    }
+
+    match /user_preferences/{userId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /reports/{reportId} {
+      allow read: if isAuthenticated();
+      allow write: if false;
+    }
+
+    match /settings/{settingId} {
+      allow read: if isAuthenticated();
+      allow write: if false;
     }
   }
 }

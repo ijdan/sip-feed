@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.routers import articles, sources
 from app.routers.admin import router as admin_router
+from app.routers.users import router as users_router
 from app.auth.google_oauth import router as auth_router
 
 app = FastAPI(title="Tech News Aggregator API", version="1.0.0")
@@ -27,6 +28,7 @@ app.include_router(auth_router, prefix="/auth", tags=["auth"])
 app.include_router(articles.router, prefix="/articles", tags=["articles"])
 app.include_router(sources.router, prefix="/sources", tags=["sources"])
 app.include_router(admin_router, prefix="/admin", tags=["admin"])
+app.include_router(users_router, prefix="/users", tags=["users"])
 
 
 @app.get("/health")

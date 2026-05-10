@@ -2,6 +2,7 @@
 import { useState, useEffect } from "react";
 import useSWR from "swr";
 import { usePreferences } from "@/lib/usePreferences";
+import { useSettings } from "@/lib/useSettings";
 import NewsCard from "@/components/NewsCard";
 import DropdownFilter, { FilterItem } from "@/components/DropdownFilter";
 import RadioFilter from "@/components/RadioFilter";
@@ -16,6 +17,7 @@ const COLUMN_CLASSES: Record<number, string> = {
 };
 
 export default function FeedPage() {
+  const { settings } = useSettings();
   const [columns, setColumns] = useState<number>(1);
   const [lang, setLang] = useState<"fr" | "en">("fr");
   const [excludedSources, setExcludedSources] = useState<Set<string>>(new Set());
@@ -38,6 +40,13 @@ export default function FeedPage() {
     const savedCat = localStorage.getItem("feed-selected-category");
     if (savedCat) setSelectedCategory(savedCat);
   }, []);
+
+  // Appliquer les settings utilisateur quand ils sont chargés depuis Firestore
+  useEffect(() => {
+    if (!settings) return;
+    setColumns(settings.columns);
+    setExcludedSources(new Set(settings.excluded_sources));
+  }, [settings]);
 
   const changeColumns = (n: number) => {
     setColumns(n);

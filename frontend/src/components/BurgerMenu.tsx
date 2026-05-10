@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
-import { useSession, signIn, signOut } from "next-auth/react";
+import { useSession, signOut } from "next-auth/react";
 import Link from "next/link";
 
 export default function BurgerMenu() {
@@ -49,6 +49,11 @@ export default function BurgerMenu() {
 
           {status === "authenticated" && (
             <>
+              <Link href="/settings" onClick={() => setOpen(false)}
+                className="flex items-center gap-2 px-4 py-2.5 text-sm transition hover:opacity-70"
+                style={{ color: "var(--text)" }}>
+                ⚙️ Paramètres
+              </Link>
               <Link href="/profile" onClick={() => setOpen(false)}
                 className="flex items-center gap-2 px-4 py-2.5 text-sm transition hover:opacity-70"
                 style={{ color: "var(--text)" }}>
@@ -70,22 +75,12 @@ export default function BurgerMenu() {
           )}
 
           {status === "unauthenticated" && (
-            <>
-              <button
-                onClick={() => { signIn("google"); setOpen(false); }}
-                className="w-full flex items-center gap-2 px-4 py-2.5 text-sm transition hover:opacity-70 text-left"
-                style={{ color: "var(--text)" }}
-              >
-                🔵 Google
-              </button>
-              <button
-                onClick={() => { signIn("github"); setOpen(false); }}
-                className="w-full flex items-center gap-2 px-4 py-2.5 text-sm transition hover:opacity-70 text-left"
-                style={{ color: "var(--text)" }}
-              >
-                🐙 GitHub
-              </button>
-            </>
+            <Link href="/login" onClick={() => setOpen(false)}
+              className="flex items-center gap-2 px-4 py-2.5 text-sm transition hover:opacity-70"
+              style={{ color: "var(--text)" }}
+            >
+              🔑 Connexion
+            </Link>
           )}
         </div>
       )}

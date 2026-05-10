@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
-import { useSession, signIn } from "next-auth/react";
+import { useSession, signOut } from "next-auth/react";
+import { useRouter } from "next/navigation";
 import { usePreferences } from "@/lib/usePreferences";
 
 const API = process.env.NEXT_PUBLIC_API_URL;
@@ -17,6 +18,7 @@ interface Profile {
 export default function ProfilePage() {
   const { data: session, status } = useSession();
   const token = (session as any)?.accessToken as string | undefined;
+  const router = useRouter();
   const { favorites, readingList, readArticles } = usePreferences();
 
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -24,6 +26,8 @@ export default function ProfilePage() {
   const [nameInput, setNameInput] = useState("");
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     if (!token) { setLoading(false); return; }
@@ -32,6 +36,13 @@ export default function ProfilePage() {
       .then(data => { setProfile(data); setNameInput(data?.name ?? ""); })
       .finally(() => setLoading(false));
   }, [token]);
+
+  const deleteAccount = async () => {
+    if (!token) return;
+    setDeleting(true);
+    await fetch(`${API}/users/me`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
+    await signOut({ callbackUrl: "/" });
+  };
 
   const saveName = async () => {
     if (!token || !nameInput.trim()) return;
@@ -50,21 +61,8 @@ export default function ProfilePage() {
   };
 
   if (status === "unauthenticated") {
-    return (
-      <div className="flex flex-col items-center gap-4 mt-20">
-        <p style={{ color: "var(--text-muted)" }}>Connectez-vous pour accéder à votre profil.</p>
-        <button onClick={() => signIn("google")}
-          className="px-6 py-2 rounded font-medium transition"
-          style={{ backgroundColor: "var(--text)", color: "var(--bg)" }}>
-          🔵 Se connecter avec Google
-        </button>
-        <button onClick={() => signIn("github")}
-          className="px-6 py-2 rounded font-medium transition border"
-          style={{ borderColor: "var(--border)", color: "var(--text)", backgroundColor: "var(--surface)" }}>
-          🐙 Se connecter avec GitHub
-        </button>
-      </div>
-    );
+    router.replace("/login");
+    return null;
   }
 
   if (loading) return <p className="mt-20 text-center" style={{ color: "var(--text-muted)" }}>Chargement…</p>;
@@ -158,6 +156,36 @@ export default function ProfilePage() {
             </div>
           ))}
         </div>
+      </div>
+
+      {/* Suppression du compte */}
+      <div className="rounded-xl border p-6 space-y-3"
+        style={{ backgroundColor: "var(--surface)", borderColor: "var(--border)" }}>
+        <h2 className="font-semibold" style={{ color: "var(--text)" }}>Compte</h2>
+        {!deleteConfirm ? (
+          <button onClick={() => setDeleteConfirm(true)}
+            className="px-4 py-2 rounded border text-sm font-medium transition"
+            style={{ borderColor: "#ef4444", color: "#ef4444", backgroundColor: "var(--surface)" }}>
+            Supprimer mon compte
+          </button>
+        ) : (
+          <div className="space-y-3 p-4 rounded-lg border" style={{ borderColor: "#ef4444" }}>
+            <p className="text-sm font-medium" style={{ color: "#ef4444" }}>
+              ⚠️ Cette action est irréversible. Toutes vos données seront supprimées.
+            </p>
+            <div className="flex gap-3">
+              <button onClick={deleteAccount} disabled={deleting}
+                className="px-4 py-2 rounded text-sm font-medium text-white disabled:opacity-50"
+                style={{ backgroundColor: "#ef4444" }}>
+                {deleting ? "Suppression…" : "Confirmer"}
+              </button>
+              <button onClick={() => setDeleteConfirm(false)}
+                className="px-4 py-2 rounded text-sm" style={{ color: "var(--text-muted)" }}>
+                Annuler
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

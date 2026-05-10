@@ -1,48 +1,20 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useSettings } from "@/lib/useSettings";
 
 type FontSize = "sm" | "md" | "lg";
-const FONT_SIZES: { key: FontSize; label: string; px: number }[] = [
-  { key: "sm", label: "A", px: 12 },
-  { key: "md", label: "A", px: 16 },
-  { key: "lg", label: "A", px: 22 },
+const FONT_SIZES: { key: FontSize; px: number }[] = [
+  { key: "sm", px: 12 },
+  { key: "md", px: 16 },
+  { key: "lg", px: 22 },
 ];
 
 export default function Controls() {
-  const [dark, setDark] = useState(false);
-  const [fontSize, setFontSize] = useState<FontSize>("md");
+  const { settings, update } = useSettings();
+  const dark = settings.theme === "dark";
+  const fontSize = settings.font_size as FontSize;
 
-  useEffect(() => {
-    // Thème
-    const savedTheme = localStorage.getItem("theme");
-    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-    const isDark = savedTheme === "dark" || (!savedTheme && prefersDark);
-    setDark(isDark);
-    document.documentElement.classList.toggle("dark", isDark);
-
-    // Police
-    const savedFont = (localStorage.getItem("font-size") ?? "md") as FontSize;
-    setFontSize(savedFont);
-    applyFont(savedFont);
-  }, []);
-
-  const applyFont = (size: FontSize) => {
-    document.documentElement.classList.remove("font-size-sm", "font-size-md", "font-size-lg");
-    document.documentElement.classList.add(`font-size-${size}`);
-  };
-
-  const toggleTheme = () => {
-    const next = !dark;
-    setDark(next);
-    document.documentElement.classList.toggle("dark", next);
-    localStorage.setItem("theme", next ? "dark" : "light");
-  };
-
-  const changeFont = (size: FontSize) => {
-    setFontSize(size);
-    applyFont(size);
-    localStorage.setItem("font-size", size);
-  };
+  const toggleTheme = () => update({ theme: dark ? "light" : "dark" });
+  const changeFont = (size: FontSize) => update({ font_size: size });
 
   const btnBase = "flex items-center justify-center rounded transition";
 
@@ -51,7 +23,7 @@ export default function Controls() {
       {/* Sélecteur taille de police */}
       <div className="flex items-center border rounded-md overflow-hidden"
         style={{ borderColor: "var(--border)" }}>
-        {FONT_SIZES.map(({ key, label, px }) => (
+        {FONT_SIZES.map(({ key, px }) => (
           <button
             key={key}
             onClick={() => changeFont(key)}
@@ -66,7 +38,7 @@ export default function Controls() {
               )
             }}
           >
-            {label}
+            A
           </button>
         ))}
       </div>

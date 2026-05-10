@@ -1,26 +1,19 @@
 "use client";
-import { useSession, signIn } from "next-auth/react";
+import { useSession } from "next-auth/react";
+import { useRouter } from "next/navigation";
 import SourceManager from "@/components/admin/SourceManager";
 import AdminSettings from "@/components/admin/AdminSettings";
 import LogViewer from "@/components/admin/LogViewer";
 
 export default function AdminPage() {
   const { data: session, status } = useSession();
+  const router = useRouter();
   const role = (session as any)?.role;
   const token = (session as any)?.accessToken;
 
   if (status === "unauthenticated") {
-    return (
-      <div className="flex flex-col items-center gap-4 mt-20">
-        <p className="text-gray-500">Connectez-vous pour accéder à l'administration.</p>
-        <button
-          onClick={() => signIn("google")}
-          className="bg-gray-900 text-white px-6 py-2 rounded hover:bg-gray-700 transition"
-        >
-          Se connecter avec Google
-        </button>
-      </div>
-    );
+    router.replace("/login");
+    return null;
   }
 
   if (status === "loading") {

@@ -24,3 +24,11 @@ class UserPreferences(BaseModel):
     reading_list: list[str] = []
     read_articles: list[str] = []
     dismissed: list[str] = []
+
+
+class UserSettings(BaseModel):
+    theme: str = "light"
+    columns: int = 1
+    font_size: str = "md"
+    excluded_categories: list[str] = []
+    excluded_sources: list[str] = []

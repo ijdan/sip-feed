@@ -22,6 +22,7 @@ export default function FeedPage() {
   const [dismissedList, setDismissedList] = useState<string[]>([]);
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [readingList, setReadingList] = useState<Set<string>>(new Set());
+  const [readArticles, setReadArticles] = useState<Set<string>>(new Set());
   const [filterFavorites, setFilterFavorites] = useState(false);
   const [filterReading, setFilterReading] = useState(false);
 
@@ -40,6 +41,8 @@ export default function FeedPage() {
     if (savedFav) setFavorites(new Set(JSON.parse(savedFav)));
     const savedRL = localStorage.getItem("feed-reading-list");
     if (savedRL) setReadingList(new Set(JSON.parse(savedRL)));
+    const savedRead = localStorage.getItem("feed-read-articles");
+    if (savedRead) setReadArticles(new Set(JSON.parse(savedRead)));
   }, []);
 
   const changeColumns = (n: number) => {
@@ -100,6 +103,13 @@ export default function FeedPage() {
     next.has(id) ? next.delete(id) : next.add(id);
     setFavorites(next);
     localStorage.setItem("feed-favorites", JSON.stringify(Array.from(next)));
+  };
+
+  const markAsRead = (id: string) => {
+    const next = new Set(readArticles);
+    next.add(id);
+    setReadArticles(next);
+    localStorage.setItem("feed-read-articles", JSON.stringify(Array.from(next)));
   };
 
   const toggleReadingList = (id: string) => {
@@ -260,8 +270,10 @@ export default function FeedPage() {
             onDismiss={() => dismissArticle(article.id)}
             onFavorite={() => toggleFavorite(article.id)}
             onReadingList={() => toggleReadingList(article.id)}
+            onMarkRead={() => markAsRead(article.id)}
             isFavorite={favorites.has(article.id)}
             isInReadingList={readingList.has(article.id)}
+            isRead={readArticles.has(article.id)}
           />
         ))}
       </div>

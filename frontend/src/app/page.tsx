@@ -72,6 +72,21 @@ export default function FeedPage() {
     const next = [...dismissedList, id];
     setDismissedList(next);
     localStorage.setItem("feed-dismissed", JSON.stringify(next));
+
+    // Retirer des favoris si présent
+    if (favorites.has(id)) {
+      const nextFav = new Set(favorites);
+      nextFav.delete(id);
+      setFavorites(nextFav);
+      localStorage.setItem("feed-favorites", JSON.stringify(Array.from(nextFav)));
+    }
+    // Retirer de la liste de lecture si présent
+    if (readingList.has(id)) {
+      const nextRL = new Set(readingList);
+      nextRL.delete(id);
+      setReadingList(nextRL);
+      localStorage.setItem("feed-reading-list", JSON.stringify(Array.from(nextRL)));
+    }
   };
 
   const undoDismiss = () => {

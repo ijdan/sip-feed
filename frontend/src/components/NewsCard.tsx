@@ -81,25 +81,26 @@ export default function NewsCard({
       <div className="absolute top-2 right-2 flex items-center gap-1">
         {menuOpen && (
           <div
-            className="flex items-center gap-1 px-2 py-1 rounded-full border shadow-sm"
+            className="flex items-center gap-3 px-4 py-2 rounded-full border shadow-sm"
             style={{ backgroundColor: "var(--surface)", borderColor: "var(--border)" }}
           >
             <button
               onClick={(e) => { e.stopPropagation(); onFavorite?.(); }}
               title="Favoris"
-              className="text-base transition hover:scale-110"
+              className="text-lg transition hover:scale-125"
               style={{ opacity: isFavorite ? 1 : 0.3 }}
             >⭐</button>
             <button
               onClick={(e) => { e.stopPropagation(); onReadingList?.(); }}
               title="Liste de lecture"
-              className="text-base transition hover:scale-110"
+              className="text-lg transition hover:scale-125"
               style={{ opacity: isInReadingList ? 1 : 0.3 }}
             >👓</button>
+            <div style={{ width: "1px", height: "16px", backgroundColor: "var(--border)" }} />
             <button
               onClick={(e) => { e.stopPropagation(); triggerDismiss(); }}
               title="Masquer"
-              className="text-sm font-bold transition hover:scale-110"
+              className="text-base font-bold transition hover:scale-125"
               style={{ color: "var(--text-muted)", opacity: 0.6 }}
             >✕</button>
           </div>

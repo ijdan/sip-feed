@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import SessionProvider from "@/components/SessionProvider";
-import UserMenu from "@/components/UserMenu";
+import BurgerMenu from "@/components/BurgerMenu";
 import Controls from "@/components/Controls";
 import "./globals.css";
 
@@ -17,19 +17,17 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     <html lang="fr" suppressHydrationWarning>
       <body style={{ backgroundColor: "var(--bg)", color: "var(--text)" }}>
         <SessionProvider session={session}>
-          <header style={{ backgroundColor: "var(--surface)", borderColor: "var(--border)" }}
-            className="border-b px-6 py-4 flex items-center justify-between">
+          <header
+            style={{ backgroundColor: "var(--surface)", borderColor: "var(--border)" }}
+            className="border-b px-6 py-3 flex items-center justify-between"
+          >
             <h1 className="text-xl font-bold">Sip-feed</h1>
-            <div className="flex items-center gap-4">
-              <nav className="flex gap-4 text-sm" style={{ color: "var(--text-muted)" }}>
-                <a href="/" className="hover:underline">Feed</a>
-                <a href="/admin" className="hover:underline">Admin</a>
-              </nav>
+            <div className="flex items-center gap-2">
               <Controls />
-              <UserMenu />
+              <BurgerMenu />
             </div>
           </header>
-          <main className="max-w-4xl mx-auto px-4 py-8">{children}</main>
+          <main className="max-w-5xl mx-auto px-4 py-6">{children}</main>
         </SessionProvider>
       </body>
     </html>

@@ -2,7 +2,7 @@
 import { useState, useRef } from "react";
 import { categoryLabel } from "@/lib/categories";
 
-const DISMISS_THRESHOLD = 120; // px
+const DISMISS_THRESHOLD = 120;
 
 const CATEGORY_COLORS: Record<string, string> = {
   IA: "bg-purple-100 text-purple-800",
@@ -18,10 +18,19 @@ interface Props {
   article: any;
   lang?: "fr" | "en";
   onDismiss?: () => void;
+  onFavorite?: () => void;
+  onReadingList?: () => void;
+  isFavorite?: boolean;
+  isInReadingList?: boolean;
 }
 
-export default function NewsCard({ article, lang = "fr", onDismiss }: Props) {
+export default function NewsCard({
+  article, lang = "fr",
+  onDismiss, onFavorite, onReadingList,
+  isFavorite = false, isInReadingList = false,
+}: Props) {
   const [expanded, setExpanded] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [dragX, setDragX] = useState(0);
   const [dragging, setDragging] = useState(false);
   const [dismissed, setDismissedAnim] = useState(false);
@@ -30,17 +39,15 @@ export default function NewsCard({ article, lang = "fr", onDismiss }: Props) {
 
   const triggerDismiss = () => {
     setDismissedAnim(true);
+    setMenuOpen(false);
     setTimeout(() => onDismiss?.(), 250);
   };
 
-  const onDragStart = (clientX: number) => {
-    startX.current = clientX;
-    setDragging(true);
-  };
+  const onDragStart = (clientX: number) => { startX.current = clientX; setDragging(true); };
   const onDragMove = (clientX: number) => {
     if (!dragging) return;
     const delta = clientX - startX.current;
-    if (delta < 0) setDragX(delta); // swipe gauche uniquement
+    if (delta < 0) setDragX(delta);
   };
   const onDragEnd = () => {
     if (dragX < -DISMISS_THRESHOLD) triggerDismiss();
@@ -48,26 +55,18 @@ export default function NewsCard({ article, lang = "fr", onDismiss }: Props) {
     setDragging(false);
   };
 
-  // Choisit la bonne version selon la langue, avec fallback sur les champs génériques
-  const title = lang === "en"
-    ? (article.title_en || article.title)
-    : (article.title_fr || article.title);
-  const shortDesc = lang === "en"
-    ? (article.short_description_en || article.short_description)
-    : (article.short_description_fr || article.short_description);
-  const longDesc = lang === "en"
-    ? (article.long_description_en || article.long_description)
-    : (article.long_description_fr || article.long_description);
+  const title = lang === "en" ? (article.title_en || article.title) : (article.title_fr || article.title);
+  const shortDesc = lang === "en" ? (article.short_description_en || article.short_description) : (article.short_description_fr || article.short_description);
+  const longDesc = lang === "en" ? (article.long_description_en || article.long_description) : (article.long_description_fr || article.long_description);
 
   return (
     <div
       style={{
-        backgroundColor: "var(--surface)",
-        borderColor: "var(--border)",
+        backgroundColor: "var(--surface)", borderColor: "var(--border)",
         transform: dismissed ? "translateX(-110%)" : `translateX(${dragX}px)`,
         opacity: dismissed ? 0 : Math.max(0.3, 1 + dragX / 300),
         transition: dragging ? "none" : "transform 0.25s ease, opacity 0.25s ease",
-        cursor: dragX > 0 ? "grabbing" : "auto",
+        cursor: dragX < 0 ? "grabbing" : "auto",
       }}
       className="relative rounded-lg border p-5 shadow-sm space-y-3 group select-none"
       onTouchStart={(e) => onDragStart(e.touches[0].clientX)}
@@ -78,22 +77,48 @@ export default function NewsCard({ article, lang = "fr", onDismiss }: Props) {
       onMouseUp={onDragEnd}
       onMouseLeave={() => { if (dragging) onDragEnd(); }}
     >
-      {onDismiss && (
+      {/* Bouton menu ⋯ */}
+      <div className="absolute top-2 right-2 flex items-center gap-1">
+        {menuOpen && (
+          <div
+            className="flex items-center gap-1 px-2 py-1 rounded-full border shadow-sm"
+            style={{ backgroundColor: "var(--surface)", borderColor: "var(--border)" }}
+          >
+            <button
+              onClick={(e) => { e.stopPropagation(); onFavorite?.(); }}
+              title="Favoris"
+              className="text-base transition hover:scale-110"
+              style={{ opacity: isFavorite ? 1 : 0.3 }}
+            >⭐</button>
+            <button
+              onClick={(e) => { e.stopPropagation(); onReadingList?.(); }}
+              title="Liste de lecture"
+              className="text-base transition hover:scale-110"
+              style={{ opacity: isInReadingList ? 1 : 0.3 }}
+            >👓</button>
+            <button
+              onClick={(e) => { e.stopPropagation(); triggerDismiss(); }}
+              title="Masquer"
+              className="text-sm font-bold transition hover:scale-110"
+              style={{ color: "var(--text-muted)", opacity: 0.6 }}
+            >✕</button>
+          </div>
+        )}
         <button
-          onClick={(e) => { e.stopPropagation(); onDismiss(); }}
-          title="Masquer cet article"
-          className="absolute top-2 right-2 w-5 h-5 flex items-center justify-center rounded-full opacity-0 group-hover:opacity-100 transition-opacity text-xs"
+          onClick={(e) => { e.stopPropagation(); setMenuOpen(!menuOpen); }}
+          title="Options"
+          className="w-6 h-6 flex items-center justify-center rounded-full opacity-0 group-hover:opacity-100 transition-opacity text-sm font-bold tracking-widest"
           style={{ color: "var(--text-muted)", backgroundColor: "var(--surface-2)" }}
         >
-          ×
+          •••
         </button>
-      )}
+      </div>
+
       <div
-        className="flex items-start justify-between gap-4 cursor-pointer"
-        onClick={() => setExpanded(!expanded)}
+        className="flex items-start justify-between gap-4 cursor-pointer pr-8"
+        onClick={() => { setMenuOpen(false); setExpanded(!expanded); }}
       >
-        <h2 className="text-lg font-semibold leading-snug transition-colors"
-          style={{ color: "var(--text)" }}>
+        <h2 className="text-lg font-semibold leading-snug" style={{ color: "var(--text)" }}>
           {title}
         </h2>
         <span className={`shrink-0 text-xs font-medium px-2 py-1 rounded-full ${color}`}>
@@ -104,20 +129,18 @@ export default function NewsCard({ article, lang = "fr", onDismiss }: Props) {
       <p
         className="text-sm cursor-pointer transition-colors"
         style={{ color: "var(--text-muted)" }}
-        onClick={() => setExpanded(!expanded)}
+        onClick={() => { setMenuOpen(false); setExpanded(!expanded); }}
       >
         {shortDesc}
       </p>
 
       {expanded && longDesc && (
-        <p className="text-sm pt-3 border-t"
-          style={{ color: "var(--text)", borderColor: "var(--border)" }}>
+        <p className="text-sm pt-3 border-t" style={{ color: "var(--text)", borderColor: "var(--border)" }}>
           {longDesc}
         </p>
       )}
 
-      <div className="flex items-center justify-between text-xs pt-1"
-        style={{ color: "var(--text-muted)" }}>
+      <div className="flex items-center justify-between text-xs pt-1" style={{ color: "var(--text-muted)" }}>
         <div className="flex gap-3">
           <span>{article.source_name}</span>
           <span>·</span>
@@ -129,6 +152,7 @@ export default function NewsCard({ article, lang = "fr", onDismiss }: Props) {
           rel="noopener noreferrer"
           className="font-medium hover:underline"
           style={{ color: "var(--accent)" }}
+          onClick={(e) => e.stopPropagation()}
         >
           {lang === "en" ? "Read article →" : "Lire l'article →"}
         </a>

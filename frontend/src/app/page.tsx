@@ -105,9 +105,9 @@ export default function FeedPage() {
     localStorage.setItem("feed-favorites", JSON.stringify(Array.from(next)));
   };
 
-  const markAsRead = (id: string) => {
+  const toggleRead = (id: string) => {
     const next = new Set(readArticles);
-    next.add(id);
+    next.has(id) ? next.delete(id) : next.add(id);
     setReadArticles(next);
     localStorage.setItem("feed-read-articles", JSON.stringify(Array.from(next)));
   };
@@ -270,7 +270,7 @@ export default function FeedPage() {
             onDismiss={() => dismissArticle(article.id)}
             onFavorite={() => toggleFavorite(article.id)}
             onReadingList={() => toggleReadingList(article.id)}
-            onMarkRead={() => markAsRead(article.id)}
+            onMarkRead={() => toggleRead(article.id)}
             isFavorite={favorites.has(article.id)}
             isInReadingList={readingList.has(article.id)}
             isRead={readArticles.has(article.id)}

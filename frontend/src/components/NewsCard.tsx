@@ -88,12 +88,16 @@ export default function NewsCard({
         <div
           className="absolute inset-0 flex items-center justify-start pl-5 rounded-lg font-semibold text-sm"
           style={{
-            backgroundColor: `rgba(34,197,94,${rightProgress * 0.7})`,
+            backgroundColor: isRead
+              ? `rgba(156,163,175,${rightProgress * 0.7})`
+              : `rgba(34,197,94,${rightProgress * 0.7})`,
             color: "white",
             opacity: rightProgress,
           }}
         >
-          ✓ {lang === "en" ? "Read" : "Lu"}
+          {isRead
+            ? (lang === "en" ? "↩ Unread" : "↩ Non lu")
+            : (lang === "en" ? "✓ Read" : "✓ Lu")}
         </div>
       )}
 

@@ -49,6 +49,14 @@ Pour chaque article, produis exactement ces champs :
 - "long_description_fr" (4 à 6 phrases) : analyse enrichie en français
 - "long_description_en" (4 à 6 phrases) : analyse enrichie en anglais
 - "category" : une valeur parmi {categories}
+- "keywords_fr" : liste de 10 à 15 mots simples en français (technologies, entreprises, concepts, acteurs clés). Ex: ["intelligence artificielle", "sécurité", "OpenAI"]
+- "keywords_en" : liste de 10 à 15 mots simples en anglais (mêmes concepts). Ex: ["artificial intelligence", "security", "OpenAI"]
+
+Règles pour les mots-clés :
+- Mots simples ou expressions courtes (1 à 3 mots maximum)
+- Domaine exclusif : logiciel, technologie, informatique, numérique. Exclure les mots génériques non techniques (ex: "annonce", "nouveau", "article", "résultat", "stress")
+- Privilégier : langages de programmation, frameworks, protocoles, plateformes, entreprises tech, concepts informatiques, acronymes techniques
+- Pas de doublons entre FR et EN pour les termes identiques en VO (OpenAI, AWS, GPT, Kubernetes → dans les deux listes tels quels)
 
 Articles à traiter :
 {articles}
@@ -85,9 +93,26 @@ def enrich_articles_batch(raw_articles: list[dict], model_priority: list[str] | 
 
     enriched_list = json.loads(text)
 
+    # Traduction des catégories pour les mots-clés
+    CATEGORY_FR_EN = {
+        "IA": ("IA", "AI"), "DevOps": ("DevOps", "DevOps"), "Cloud": ("Cloud", "Cloud"),
+        "Sécurité": ("Sécurité", "Security"), "Dev": ("Dev", "Dev"),
+        "IT": ("IT", "IT"), "Autre": ("Autre", "Other"),
+    }
+
     results = []
     for i, raw in enumerate(raw_articles):
         e = enriched_list[i] if i < len(enriched_list) else {}
+        category = e.get("category", "Autre") if e.get("category") in CATEGORIES else "Autre"
+        cat_fr, cat_en = CATEGORY_FR_EN.get(category, (category, category))
+
+        kw_fr = e.get("keywords_fr", [])
+        kw_en = e.get("keywords_en", [])
+        if cat_fr and cat_fr not in kw_fr:
+            kw_fr = [cat_fr] + kw_fr
+        if cat_en and cat_en not in kw_en:
+            kw_en = [cat_en] + kw_en
+
         results.append({
             "id": str(uuid.uuid4()),
             "title_fr": e.get("title_fr", raw["title"]),
@@ -99,10 +124,12 @@ def enrich_articles_batch(raw_articles: list[dict], model_priority: list[str] | 
             "long_description_fr": e.get("long_description_fr", ""),
             "long_description_en": e.get("long_description_en", ""),
             "long_description": e.get("long_description_fr", ""),  # compat
+            "keywords_fr": kw_fr,
+            "keywords_en": kw_en,
             "article_url": raw["article_url"],
             "source_name": raw["source_name"],
             "source_id": raw["source_id"],
-            "category": e.get("category", "Autre") if e.get("category") in CATEGORIES else "Autre",
+            "category": category,
             "published_at": raw.get("published_at", datetime.utcnow().isoformat()),
             "collected_at": datetime.utcnow().isoformat(),
         })

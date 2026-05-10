@@ -19,6 +19,8 @@ class Article(BaseModel):
     long_description: str
     long_description_fr: str = ""
     long_description_en: str = ""
+    keywords_fr: list[str] = []
+    keywords_en: list[str] = []
     article_url: str
     source_name: str
     source_id: str

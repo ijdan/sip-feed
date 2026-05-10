@@ -21,7 +21,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             style={{ backgroundColor: "var(--surface)", borderColor: "var(--border)" }}
             className="border-b px-6 py-3 flex items-center justify-between"
           >
-            <h1 className="text-xl font-bold">Sip-feed</h1>
+            <a href="/" className="text-xl font-bold hover:opacity-70 transition-opacity" style={{ color: "var(--text)" }}>Sip-feed</a>
             <div className="flex items-center gap-2">
               <Controls />
               <BurgerMenu />

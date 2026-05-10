@@ -6,6 +6,7 @@ import { useSettings } from "@/lib/useSettings";
 import NewsCard from "@/components/NewsCard";
 import DropdownFilter, { FilterItem } from "@/components/DropdownFilter";
 import RadioFilter from "@/components/RadioFilter";
+import SearchBar from "@/components/SearchBar";
 import { CATEGORIES, categoryLabel } from "@/lib/categories";
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
@@ -29,6 +30,8 @@ export default function FeedPage() {
   } = usePreferences();
   const [filterFavorites, setFilterFavorites] = useState(false);
   const [filterReading, setFilterReading] = useState(false);
+  const [searchTerms, setSearchTerms] = useState<string[]>([]);
+  const [searchOpen, setSearchOpen] = useState(false);
 
   useEffect(() => {
     const savedCols = localStorage.getItem("feed-columns");
@@ -95,14 +98,27 @@ export default function FeedPage() {
   }));
 
   // Articles filtrés
-  const filteredItems = (data?.items ?? []).filter(
-    (a: any) =>
-      !excludedSources.has(a.source_name) &&
-      (selectedCategory === null || a.category === selectedCategory) &&
-      !dismissedSet.has(a.id) &&
-      (!filterFavorites || favorites.has(a.id)) &&
-      (!filterReading || readingList.has(a.id))
-  );
+  const filteredItems = (data?.items ?? []).filter((a: any) => {
+    if (excludedSources.has(a.source_name)) return false;
+    if (selectedCategory !== null && a.category !== selectedCategory) return false;
+    if (dismissedSet.has(a.id)) return false;
+    if (filterFavorites && !favorites.has(a.id)) return false;
+    if (filterReading && !readingList.has(a.id)) return false;
+    if (searchTerms.length > 0) {
+      const kw = ((lang === "en" ? a.keywords_en : a.keywords_fr) ?? [])
+        .map((k: string) => k.toLowerCase());
+      if (!searchTerms.every(t => kw.some(k => k.includes(t.toLowerCase())))) return false;
+    }
+    return true;
+  });
+
+  // Suggestions contextuelles : mots-clés des articles déjà filtrés
+  // → se réduisent au fur et à mesure des mots-clés sélectionnés
+  const allKeywords: string[] = Array.from(
+    new Set<string>(filteredItems.flatMap((a: any) =>
+      lang === "en" ? (a.keywords_en ?? []) : (a.keywords_fr ?? [])
+    ))
+  ).sort();
 
   const filteredTotal = filteredItems.length;
   const totalAll = data?.total ?? 0;
@@ -132,6 +148,18 @@ export default function FeedPage() {
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Loupe */}
+          <button
+            onClick={() => { setSearchOpen(o => !o); if (searchOpen) setSearchTerms([]); }}
+            title={searchOpen ? "Fermer la recherche" : "Rechercher"}
+            className="w-8 h-8 flex items-center justify-center rounded-md border transition text-sm"
+            style={{
+              borderColor: searchOpen || searchTerms.length > 0 ? "var(--accent)" : "var(--border)",
+              backgroundColor: searchOpen || searchTerms.length > 0 ? "var(--accent)" : "var(--surface)",
+              color: searchOpen || searchTerms.length > 0 ? "var(--bg)" : "var(--text-muted)",
+            }}
+          >🔍</button>
+
           {/* Langue */}
           <div className="flex border rounded-md overflow-hidden" style={{ borderColor: "var(--border)" }}>
             {(["fr", "en"] as const).map((l) => (
@@ -160,6 +188,20 @@ export default function FeedPage() {
           </div>
         </div>
       </div>
+
+      {/* Barre de recherche — visible uniquement si ouverte */}
+      {searchOpen && (
+        <SearchBar
+          terms={searchTerms}
+          suggestions={allKeywords}
+          lang={lang}
+          onAdd={(t) => setSearchTerms(prev => [...prev, t])}
+          onRemove={(t) => {
+            if (t === "__all__") setSearchTerms([]);
+            else setSearchTerms(prev => prev.filter(x => x !== t));
+          }}
+        />
+      )}
 
       {/* Ligne 2 : filtres dropdown + favoris/lecture */}
       <div className="flex items-center gap-2 flex-wrap">

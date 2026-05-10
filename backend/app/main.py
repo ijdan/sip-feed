@@ -10,9 +10,11 @@ from app.routers import articles, sources
 from app.routers.admin import router as admin_router
 from app.routers.users import router as users_router
 from app.auth.google_oauth import router as auth_router
+from app.middleware import StatsMiddleware
 
 app = FastAPI(title="Tech News Aggregator API", version="1.0.0")
 
+app.add_middleware(StatsMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[

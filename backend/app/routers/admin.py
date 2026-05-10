@@ -182,6 +182,55 @@ def purge_and_collect(current_user: dict = Depends(require_admin)):
     return trigger_collection(current_user)
 
 
+@router.get("/stats")
+def get_stats(_: dict = Depends(require_admin)):
+    from datetime import date, timedelta
+    db = get_db()
+
+    # Nombre d'utilisateurs enregistrés
+    users_count = len(list(db.collection("users").stream()))
+
+    # Appels API : agréger sur today, 7j, 30j
+    today = date.today()
+    periods = {"today": 0, "last_7": 6, "last_30": 29}
+    api_calls: dict = {}
+
+    for days_back in range(30):
+        day = (today - timedelta(days=days_back)).isoformat()
+        doc = db.collection("api_stats").document(day).get()
+        if not doc.exists:
+            continue
+        for identifier, count in doc.to_dict().items():
+            if identifier not in api_calls:
+                api_calls[identifier] = {"today": 0, "last_7": 0, "last_30": 0}
+            if days_back == 0:
+                api_calls[identifier]["today"] += count
+            if days_back <= 6:
+                api_calls[identifier]["last_7"] += count
+            api_calls[identifier]["last_30"] += count
+
+    # Stats articles par utilisateur
+    user_stats = []
+    for pref_doc in db.collection("user_preferences").stream():
+        d = pref_doc.to_dict()
+        user_stats.append({
+            "email": pref_doc.id,
+            "favorites": len(d.get("favorites", [])),
+            "reading_list": len(d.get("reading_list", [])),
+            "read_articles": len(d.get("read_articles", [])),
+            "dismissed": len(d.get("dismissed", [])),
+        })
+
+    return {
+        "users_count": users_count,
+        "api_calls": [
+            {"identifier": k, **v}
+            for k, v in sorted(api_calls.items(), key=lambda x: -x[1]["last_30"])
+        ],
+        "user_article_stats": sorted(user_stats, key=lambda x: -x["favorites"]),
+    }
+
+
 @router.get("/report")
 def get_latest_report(_: dict = Depends(require_admin)):
     db = get_db()

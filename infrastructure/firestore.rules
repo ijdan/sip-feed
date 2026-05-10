@@ -39,5 +39,10 @@ service cloud.firestore {
       allow read: if isAuthenticated();
       allow write: if false;
     }
+
+    match /api_stats/{day} {
+      allow read: if isAdmin();
+      allow write: if false; // écriture via backend uniquement
+    }
   }
 }

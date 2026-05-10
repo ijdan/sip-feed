@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import useSWR from "swr";
+import { useSession } from "next-auth/react";
 import { usePreferences } from "@/lib/usePreferences";
 import { useSettings } from "@/lib/useSettings";
 import NewsCard from "@/components/NewsCard";
@@ -19,6 +20,8 @@ const COLUMN_CLASSES: Record<number, string> = {
 };
 
 export default function FeedPage() {
+  const { data: session, status: sessionStatus } = useSession();
+  const token = (session as any)?.accessToken as string | undefined;
   const { settings } = useSettings();
   const [columns, setColumns] = useState<number>(1);
   const [lang, setLang] = useState<"fr" | "en">("fr");
@@ -32,6 +35,7 @@ export default function FeedPage() {
   const [trashOpen, setTrashOpen] = useState(false);
   const [filterFavorites, setFilterFavorites] = useState(false);
   const [filterReading, setFilterReading] = useState(false);
+  const [hideRead, setHideRead] = useState(false);
   const [searchTerms, setSearchTerms] = useState<string[]>([]);
   const [searchOpen, setSearchOpen] = useState(false);
 
@@ -79,7 +83,12 @@ export default function FeedPage() {
 
 
   const articlesUrl = `${process.env.NEXT_PUBLIC_API_URL}/articles/?page_size=500`;
-  const { data, isLoading } = useSWR(articlesUrl, fetcher);
+  const { data, isLoading } = useSWR(
+    // Attendre que la session soit déterminée pour éviter un double fetch
+    sessionStatus === "loading" ? null : [articlesUrl, token ?? ""],
+    ([url, t]) => fetch(url, t ? { headers: { Authorization: `Bearer ${t}` } } : {}).then(r => r.json()),
+    { revalidateOnFocus: false }  // évite un refetch au changement de focus
+  );
 
   // Sources uniques avec compteurs
   const sourceCountsAll: Record<string, number> = (data?.items ?? []).reduce(
@@ -106,6 +115,7 @@ export default function FeedPage() {
     if (dismissedSet.has(a.id)) return false;
     if (filterFavorites && !favorites.has(a.id)) return false;
     if (filterReading && !readingList.has(a.id)) return false;
+    if (hideRead && readArticles.has(a.id)) return false;
     if (searchTerms.length > 0) {
       const kw = ((lang === "en" ? a.keywords_en : a.keywords_fr) ?? [])
         .map((k: string) => k.toLowerCase());
@@ -124,7 +134,7 @@ export default function FeedPage() {
 
   const filteredTotal = filteredItems.length;
   const totalAll = data?.total ?? 0;
-  const hasFilters = excludedSources.size > 0 || selectedCategory !== null || filterFavorites || filterReading || searchTerms.length > 0;
+  const hasFilters = excludedSources.size > 0 || selectedCategory !== null || filterFavorites || filterReading || hideRead || searchTerms.length > 0;
 
   return (
     <div className="space-y-4">
@@ -132,20 +142,21 @@ export default function FeedPage() {
       {/* Ligne 1 : compteur + undo + contrôles */}
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div className="flex items-center gap-2 text-sm" style={{ color: "var(--text-muted)" }}>
-          {dismissedList.length > 0 && (
-            <button
-              onClick={() => setTrashOpen(o => !o)}
-              title={`Corbeille (${dismissedList.length} article${dismissedList.length > 1 ? "s" : ""})`}
-              className="flex items-center gap-1 px-2 py-1 rounded-md border text-sm transition"
-              style={{
-                borderColor: trashOpen ? "var(--accent)" : "var(--border)",
-                backgroundColor: trashOpen ? "var(--accent)" : "var(--surface)",
-                color: trashOpen ? "var(--bg)" : "var(--text)",
-              }}
-            >
-              🗑️ <span className="text-xs opacity-80">{dismissedList.length}</span>
-            </button>
-          )}
+          <button
+            onClick={() => setTrashOpen(o => !o)}
+            title={dismissedList.length > 0
+              ? `Corbeille (${dismissedList.length} article${dismissedList.length > 1 ? "s" : ""})`
+              : "Corbeille vide"}
+            className="flex items-center gap-1 px-2 py-1 rounded-md border text-sm transition"
+            style={{
+              borderColor: trashOpen ? "var(--accent)" : "var(--border)",
+              backgroundColor: trashOpen ? "var(--accent)" : "var(--surface)",
+              color: trashOpen ? "var(--bg)" : dismissedList.length > 0 ? "var(--text)" : "var(--text-muted)",
+              opacity: dismissedList.length === 0 && !trashOpen ? 0.5 : 1,
+            }}
+          >
+            🗑️ {dismissedList.length > 0 && <span className="text-xs opacity-80">{dismissedList.length}</span>}
+          </button>
           <span>
             {isLoading ? "…" : hasFilters
               ? `${filteredTotal} sur ${totalAll} article${totalAll > 1 ? "s" : ""}`
@@ -250,6 +261,21 @@ export default function FeedPage() {
             }}
           >
             👓{readingList.size > 0 && <span className="ml-1 text-xs">{readingList.size}</span>}
+          </button>
+          <button
+            onClick={() => setHideRead(h => !h)}
+            title={hideRead
+              ? `Afficher les articles lus (${readArticles.size})`
+              : `Masquer les articles lus (${readArticles.size})`}
+            className="px-2.5 py-1.5 rounded-md border text-sm transition"
+            style={{
+              borderColor: hideRead ? "var(--accent)" : "var(--border)",
+              backgroundColor: hideRead ? "var(--accent)" : "var(--surface)",
+              color: hideRead ? "var(--bg)" : readArticles.size > 0 ? "var(--text)" : "var(--text-muted)",
+              opacity: readArticles.size === 0 && !hideRead ? 0.4 : 1,
+            }}
+          >
+            ✓{readArticles.size > 0 && <span className="ml-1 text-xs">{readArticles.size}</span>}
           </button>
         </div>
       </div>

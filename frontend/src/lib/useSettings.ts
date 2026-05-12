@@ -54,6 +54,7 @@ function saveLocal(s: UserSettings) {
   localStorage.setItem("font-size", s.font_size);
   localStorage.setItem("feed-excluded-sources", JSON.stringify(s.excluded_sources));
   localStorage.setItem("feed-excluded-categories", JSON.stringify(s.excluded_categories));
+  localStorage.setItem("feed-hide-read", String(s.hide_read));
 }
 
 function loadLocal(): UserSettings {
@@ -67,6 +68,7 @@ function loadLocal(): UserSettings {
     font_size: (localStorage.getItem("font-size") as "sm" | "md" | "lg") || DEFAULTS.font_size,
     excluded_categories: JSON.parse(localStorage.getItem("feed-excluded-categories") || "[]"),
     excluded_sources: JSON.parse(localStorage.getItem("feed-excluded-sources") || "[]"),
+    hide_read: localStorage.getItem("feed-hide-read") === "true",
   };
 }
 

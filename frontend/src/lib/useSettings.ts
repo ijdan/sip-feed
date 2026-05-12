@@ -8,6 +8,7 @@ export interface UserSettings {
   font_size: "sm" | "md" | "lg";
   excluded_categories: string[];
   excluded_sources: string[];
+  hide_read: boolean;
 }
 
 const DEFAULTS: UserSettings = {
@@ -16,6 +17,7 @@ const DEFAULTS: UserSettings = {
   font_size: "md",
   excluded_categories: [],
   excluded_sources: [],
+  hide_read: false,
 };
 
 const API = process.env.NEXT_PUBLIC_API_URL;

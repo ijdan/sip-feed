@@ -62,6 +62,17 @@ export default function SettingsPage() {
             ))}
           </div>
         </Row>
+        <Row label="Masquer les articles lus">
+          <button
+            onClick={() => { update({ hide_read: !settings.hide_read }); flash(); }}
+            role="switch"
+            aria-checked={settings.hide_read}
+            className="relative w-11 h-6 rounded-full transition-colors"
+            style={{ backgroundColor: settings.hide_read ? "var(--accent)" : "var(--border)" }}
+          >
+            <span className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-transform ${settings.hide_read ? "translate-x-6" : "translate-x-1"}`} />
+          </button>
+        </Row>
         <Row label="Colonnes">
           <div className="flex border rounded-md overflow-hidden" style={{ borderColor: "var(--border)" }}>
             {([1, 2, 3] as const).map(n => (

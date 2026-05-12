@@ -32,3 +32,4 @@ class UserSettings(BaseModel):
     font_size: str = "md"
     excluded_categories: list[str] = []
     excluded_sources: list[str] = []
+    hide_read: bool = False

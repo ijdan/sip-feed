@@ -55,6 +55,7 @@ export default function FeedPage() {
     if (!settings) return;
     setColumns(settings.columns);
     setExcludedSources(new Set(settings.excluded_sources));
+    setHideRead(settings.hide_read ?? false);
   }, [settings]);
 
   const changeColumns = (n: number) => {
@@ -291,18 +292,18 @@ export default function FeedPage() {
             <p className="text-sm" style={{ color: "var(--text-muted)" }}>La corbeille est vide.</p>
           )}
           <div className="space-y-3">
-            {dismissedList.map(id => {
-              const article = (data?.items ?? []).find((a: any) => a.id === id);
-              if (!article) return null;
-              return (
+            {[...dismissedList]
+              .map(id => (data?.items ?? []).find((a: any) => a.id === id))
+              .filter(Boolean)
+              .sort((a: any, b: any) => b.published_at.localeCompare(a.published_at))
+              .map((article: any) => (
                 <TrashCard
-                  key={id}
+                  key={article.id}
                   article={article}
                   lang={lang}
-                  onRestore={() => restoreArticle(id)}
+                  onRestore={() => restoreArticle(article.id)}
                 />
-              );
-            })}
+              ))}
           </div>
         </div>
       ) : (

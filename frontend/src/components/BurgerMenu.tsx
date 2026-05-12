@@ -38,6 +38,13 @@ export default function BurgerMenu() {
             📰 Feed
           </Link>
           {(session as any)?.role === "admin" && (
+            <Link href="/admin/synthesis" onClick={() => setOpen(false)}
+              className="flex items-center gap-2 px-4 py-2.5 text-sm transition hover:opacity-70"
+              style={{ color: "var(--text)" }}>
+              🎯 Synthèse
+            </Link>
+          )}
+          {(session as any)?.role === "admin" && (
             <Link href="/admin/stats" onClick={() => setOpen(false)}
               className="flex items-center gap-2 px-4 py-2.5 text-sm transition hover:opacity-70"
               style={{ color: "var(--text)" }}>

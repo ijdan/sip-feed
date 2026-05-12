@@ -34,6 +34,7 @@ interface Settings {
   model_priority: string[];
   gmail_lookback_days: number;
   retention_days: number;
+  interest: string;
 }
 
 export default function AdminSettings({ token }: { token: string }) {
@@ -41,7 +42,7 @@ export default function AdminSettings({ token }: { token: string }) {
     "admin-settings",
     () => apiFetch("/admin/settings", token)
   );
-  const [confirm, setConfirm] = useState(false);
+
   const [saving, setSaving] = useState(false);
 
   const updateSettings = async (updated: Settings) => {
@@ -67,16 +68,6 @@ export default function AdminSettings({ token }: { token: string }) {
     await updateSettings({ ...settings!, model_priority: newOrder });
   };
 
-  const handlePurgeAndCollect = async () => {
-    if (!confirm) { setConfirm(true); return; }
-    setConfirm(false);
-    try {
-      await apiFetch("/admin/purge-and-collect", token, { method: "POST" });
-      alert("Purge et collecte lancées !");
-    } catch {
-      alert("Erreur lors du lancement.");
-    }
-  };
 
   if (isLoading || !settings) return <p className="text-sm text-gray-400">Chargement des paramètres...</p>;
 
@@ -136,7 +127,7 @@ export default function AdminSettings({ token }: { token: string }) {
         </div>
         <p className="text-xs text-gray-400">Le collector essaie les modèles dans l'ordre. Si le premier est indisponible (quota), il passe au suivant.</p>
         <div className="space-y-2">
-          {settings.model_priority.map((modelId, i) => {
+          {(settings.model_priority ?? []).map((modelId, i) => {
             const info = MODEL_LABELS[modelId] ?? { label: modelId };
             return (
               <div
@@ -158,7 +149,7 @@ export default function AdminSettings({ token }: { token: string }) {
                   </button>
                   <button
                     onClick={() => moveModel(i, 1)}
-                    disabled={i === settings.model_priority.length - 1 || saving}
+                    disabled={i === (settings.model_priority ?? []).length - 1 || saving}
                     className="w-6 h-6 rounded text-gray-400 hover:text-gray-700 hover:bg-gray-100 disabled:opacity-20 text-sm"
                   >
                     ▼
@@ -170,24 +161,26 @@ export default function AdminSettings({ token }: { token: string }) {
         </div>
       </div>
 
-      <div className="border-t pt-4">
-        <p className="text-sm text-gray-500 mb-3">
-          Lance une collecte complète en repartant de zéro (purge tous les articles existants).
-        </p>
-        <button
-          onClick={handlePurgeAndCollect}
-          className={`px-4 py-2 rounded text-sm font-medium transition ${
-            confirm ? "bg-red-600 text-white hover:bg-red-700" : "bg-gray-900 text-white hover:bg-gray-700"
-          }`}
-        >
-          {confirm ? "Confirmer la purge ?" : "Forcer la récupération"}
-        </button>
-        {confirm && (
-          <button onClick={() => setConfirm(false)} className="ml-3 text-sm text-gray-500 hover:underline">
-            Annuler
-          </button>
-        )}
+      <div className="border-t pt-4 space-y-3">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Centre d'intérêt pour la synthèse
+          </label>
+          <p className="text-xs text-gray-400 mb-2">
+            Après chaque collecte, le LLM produira une synthèse ciblée sur ce sujet.
+            Laisser vide pour désactiver.
+          </p>
+          <textarea
+            value={settings.interest ?? ""}
+            onChange={(e) => updateSettings({ ...settings!, interest: e.target.value })}
+            onBlur={() => saving || undefined}
+            placeholder="Ex: SDLC à l'aune de l'IA"
+            rows={2}
+            className="w-full border rounded px-3 py-2 text-sm text-gray-700 bg-white resize-none disabled:opacity-50"
+          />
+        </div>
       </div>
+
     </div>
   );
 }

@@ -68,9 +68,9 @@ export default function SourceManager({ token }: { token: string }) {
   };
 
   return (
-    <div className="space-y-8">
-      <form onSubmit={handleSubmit} className="bg-white border rounded-lg p-6 space-y-4">
-        <h3 className="font-semibold text-lg">Ajouter une source</h3>
+    <div className="bg-white border rounded-lg p-6 space-y-6">
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <h3 className="font-semibold text-lg">Sources</h3>
         <div className="grid grid-cols-2 gap-4">
           <input
             required
@@ -114,8 +114,7 @@ export default function SourceManager({ token }: { token: string }) {
         </button>
       </form>
 
-      <div className="space-y-3">
-        <h3 className="font-semibold text-lg">Sources configurées</h3>
+      <div className="space-y-3 border-t pt-4">
         {isLoading && <p className="text-gray-500 text-sm">Chargement...</p>}
         {sources?.map((s: any) => (
           <div key={s.id} className={`bg-white border rounded-lg px-5 py-3 flex items-center justify-between gap-4 transition ${!s.active ? "opacity-50" : ""}`}>

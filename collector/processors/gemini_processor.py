@@ -260,6 +260,79 @@ def extract_and_enrich_gmail(
     return all_articles
 
 
+SYNTHESIS_PROMPT = """
+Tu es un analyste tech expert en veille stratégique.
+
+Centre d'intérêt : {interest}
+
+Tu disposes ci-dessous d'un corpus de {count} articles tech récemment collectés.
+Ton objectif : produire une synthèse de veille ciblée sur le centre d'intérêt indiqué,
+en t'appuyant UNIQUEMENT sur les articles fournis.
+
+Règles :
+- Ne retiens que les articles pertinents par rapport au centre d'intérêt
+- Si aucun article n'est pertinent, dis-le explicitement
+- Structure ta réponse en sections claires avec des émojis
+- Cite les titres d'articles pour étayer chaque point
+- Ton analytique, factuel, orienté décision
+
+Structure attendue :
+
+**🔭 Vue d'ensemble**
+En 2-3 phrases : l'état du sujet à la lumière des articles collectés.
+
+**🔑 Points clés**
+Les 3 à 5 insights les plus importants en lien avec le centre d'intérêt,
+chacun illustré par un ou plusieurs articles du corpus.
+
+**📈 Tendances émergentes**
+Ce qui semble émerger ou évoluer sur ce sujet selon les articles.
+
+**📌 Articles les plus pertinents**
+Liste des 3 à 5 articles les plus directement en lien, avec une phrase d'explication.
+
+**❓ Ce qui manque**
+Angles ou questions liés au centre d'intérêt que les articles ne couvrent pas.
+
+---
+Corpus ({count} articles) :
+{articles}
+"""
+
+
+def generate_synthesis(articles: list[dict], interest: str, model_priority: list[str] | None = None) -> str:
+    """Génère une synthèse ciblée sur le centre d'intérêt à partir des articles."""
+    import logging
+    logger = logging.getLogger(__name__)
+
+    if not interest.strip():
+        return ""
+
+    articles_text = ""
+    for a in articles:
+        title = a.get("title_fr") or a.get("title", "")
+        desc = a.get("long_description_fr") or a.get("long_description", "")[:600]
+        articles_text += f"- {title}\n  {desc}\n\n"
+
+    prompt = SYNTHESIS_PROMPT.format(
+        interest=interest,
+        count=len(articles),
+        articles=articles_text[:180000],
+    )
+
+    models_to_try = model_priority or DEFAULT_MODEL_PRIORITY
+    for model_name in models_to_try:
+        try:
+            m = genai.GenerativeModel(model_name, generation_config={"temperature": 0.4, "max_output_tokens": 8000})
+            response = m.generate_content(prompt)
+            logger.info(f"Synthèse générée par {model_name}")
+            return response.text.strip()
+        except Exception as e:
+            logger.warning(f"Synthèse : {model_name} indisponible ({e.__class__.__name__})")
+
+    return "⚠️ Synthèse indisponible — quota LLM épuisé."
+
+
 REPORT_PROMPT = """
 Tu es un assistant chargé de rédiger un rapport de synthèse clair et concis
 d'une exécution de collecte de veille technologique.
@@ -312,10 +385,10 @@ def generate_run_report(logs: str, model_priority: list[str] | None = None) -> s
         try:
             m = genai.GenerativeModel(model_name)
             response = m.generate_content(prompt)
-            logger.debug(f"Rapport généré par {model_name}")
+            logger.info(f"Rapport généré par {model_name}")
             return response.text.strip()
         except Exception as e:
-            logger.debug(f"Rapport : modèle {model_name} indisponible ({e.__class__.__name__})")
+            logger.warning(f"Rapport : modèle {model_name} indisponible ({e.__class__.__name__})")
 
     return "⚠️ Rapport indisponible — tous les modèles LLM sont hors quota."
 

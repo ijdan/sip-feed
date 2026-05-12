@@ -28,6 +28,8 @@ export default function StatsPage() {
 
   if (!data) return null;
 
+  const apiCalls = data.api_calls ?? [];
+  const userStats = data.user_article_stats ?? [];
   const formatId = (id: string) =>
     id.startsWith("ip:") ? `🌐 ${id.slice(3)}` : `👤 ${id}`;
 
@@ -45,7 +47,7 @@ export default function StatsPage() {
 
       {/* Activité API */}
       <Section title="Appels API /articles/">
-        {data.api_calls.length === 0 ? (
+        {apiCalls.length === 0 ? (
           <p className="text-sm" style={{ color: "var(--text-muted)" }}>Aucune donnée encore.</p>
         ) : (
           <div className="overflow-x-auto">
@@ -58,7 +60,7 @@ export default function StatsPage() {
                 </tr>
               </thead>
               <tbody>
-                {data.api_calls.map((row: any) => (
+                {apiCalls.map((row: any) => (
                   <tr key={row.identifier} style={{ borderBottom: "1px solid var(--border)" }}>
                     <td className="py-2 pr-4 font-mono text-xs" style={{ color: "var(--text)" }}>{formatId(row.identifier)}</td>
                     <td className="py-2 pr-4 text-center" style={{ color: "var(--text)" }}>{row.today}</td>
@@ -74,7 +76,7 @@ export default function StatsPage() {
 
       {/* Articles par utilisateur */}
       <Section title="Activité articles par utilisateur">
-        {data.user_article_stats.length === 0 ? (
+        {userStats.length === 0 ? (
           <p className="text-sm" style={{ color: "var(--text-muted)" }}>Aucune donnée encore.</p>
         ) : (
           <div className="overflow-x-auto">
@@ -87,7 +89,7 @@ export default function StatsPage() {
                 </tr>
               </thead>
               <tbody>
-                {data.user_article_stats.map((row: any) => (
+                {userStats.map((row: any) => (
                   <tr key={row.email} style={{ borderBottom: "1px solid var(--border)" }}>
                     <td className="py-2 pr-4 text-xs" style={{ color: "var(--text)" }}>👤 {row.email}</td>
                     <td className="py-2 pr-4 text-center" style={{ color: "var(--text)" }}>{row.favorites}</td>

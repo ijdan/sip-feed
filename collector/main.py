@@ -12,7 +12,7 @@ from google.cloud import firestore
 
 from scrapers.web_scraper import scrape_source
 from scrapers.gmail_reader import read_gmail_source
-from processors.gemini_processor import enrich_articles_batch, save_raw_articles, generate_run_report
+from processors.gemini_processor import enrich_articles_batch, save_raw_articles, generate_run_report, generate_synthesis
 
 # Handler pour capturer les logs en mémoire
 class _MemoryHandler(logging.Handler):
@@ -81,6 +81,7 @@ def run():
     model_priority = global_settings.get("model_priority", DEFAULT_MODEL_PRIORITY)
     gmail_lookback_days = global_settings.get("gmail_lookback_days", 1)
     retention_days = global_settings.get("retention_days", 0)
+    interest = global_settings.get("interest", "").strip()
     logger.info(f"Settings — LLM: {llm_enabled}, Thinking: {thinking_enabled}, Modèles: {model_priority}, Gmail lookback: {gmail_lookback_days}j, Rétention: {'illimitée' if retention_days == 0 else str(retention_days) + 'j'}")
 
     # Si une source spécifique est demandée, ne traiter que celle-là
@@ -166,6 +167,21 @@ def run():
 
         # Rétention : nettoyage des anciens articles (seulement si nouveaux articles trouvés)
         apply_retention(retention_days)
+
+    # Synthèse centrée sur le centre d'intérêt (si renseigné)
+    if interest:
+        logger.info(f"Génération de la synthèse pour : «{interest}»...")
+        all_articles = list(db.collection("articles").order_by("collected_at", direction="DESCENDING").limit(100).stream())
+        articles_for_synthesis = [doc.to_dict() for doc in all_articles]
+        synthesis = generate_synthesis(articles_for_synthesis, interest, model_priority)
+        from datetime import date as _date
+        db.collection("syntheses").document(_date.today().isoformat()).set({
+            "interest": interest,
+            "content": synthesis,
+            "articles_count": len(articles_for_synthesis),
+            "generated_at": datetime.utcnow().isoformat(),
+        })
+        logger.info("Synthèse sauvegardée.")
 
     # Rapport de synthèse via LLM — toujours généré
     run_logs = "\n".join(_mem_handler.records)

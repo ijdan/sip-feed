@@ -57,6 +57,7 @@ class GlobalSettings(BaseModel):
     model_priority: list[str] = DEFAULT_MODEL_PRIORITY
     gmail_lookback_days: int = 1
     retention_days: int = 0
+    interest: str = ""
 
 
 def _get_access_token() -> str:
@@ -229,6 +230,20 @@ def get_stats(_: dict = Depends(require_admin)):
         ],
         "user_article_stats": sorted(user_stats, key=lambda x: -x["favorites"]),
     }
+
+
+@router.get("/syntheses")
+def get_syntheses(_: dict = Depends(require_admin)):
+    """Retourne les synthèses des 3 derniers jours."""
+    from datetime import date, timedelta
+    db = get_db()
+    results = []
+    for days_back in range(3):
+        day = (date.today() - timedelta(days=days_back)).isoformat()
+        doc = db.collection("syntheses").document(day).get()
+        if doc.exists:
+            results.append({"date": day, **doc.to_dict()})
+    return {"syntheses": results}
 
 
 @router.get("/report")

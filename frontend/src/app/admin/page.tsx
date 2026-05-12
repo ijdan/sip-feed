@@ -28,8 +28,8 @@ export default function AdminPage() {
     <div className="space-y-8">
       <h2 className="text-2xl font-bold">Administration</h2>
       <AdminSettings token={token} />
-      <LogViewer token={token} />
       <SourceManager token={token} />
+      <LogViewer token={token} />
     </div>
   );
 }

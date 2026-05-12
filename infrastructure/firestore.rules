@@ -42,7 +42,12 @@ service cloud.firestore {
 
     match /api_stats/{day} {
       allow read: if isAdmin();
-      allow write: if false; // écriture via backend uniquement
+      allow write: if false;
+    }
+
+    match /syntheses/{day} {
+      allow read: if isAdmin();
+      allow write: if false;
     }
   }
 }

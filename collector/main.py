@@ -170,18 +170,21 @@ def run():
 
     # Synthèse centrée sur le centre d'intérêt (si renseigné)
     if interest:
-        logger.info(f"Génération de la synthèse pour : «{interest}»...")
-        all_articles = list(db.collection("articles").order_by("collected_at", direction="DESCENDING").limit(100).stream())
-        articles_for_synthesis = [doc.to_dict() for doc in all_articles]
-        synthesis = generate_synthesis(articles_for_synthesis, interest, model_priority)
-        from datetime import date as _date
-        db.collection("syntheses").document(_date.today().isoformat()).set({
-            "interest": interest,
-            "content": synthesis,
-            "articles_count": len(articles_for_synthesis),
-            "generated_at": datetime.utcnow().isoformat(),
-        })
-        logger.info("Synthèse sauvegardée.")
+        try:
+            logger.info(f"Génération de la synthèse pour : «{interest}»...")
+            all_articles = list(db.collection("articles").order_by("collected_at", direction="DESCENDING").limit(100).stream())
+            articles_for_synthesis = [doc.to_dict() for doc in all_articles]
+            synthesis = generate_synthesis(articles_for_synthesis, interest, model_priority)
+            from datetime import date as _date, datetime as _dt
+            db.collection("syntheses").document(_date.today().isoformat()).set({
+                "interest": interest,
+                "content": synthesis,
+                "articles_count": len(articles_for_synthesis),
+                "generated_at": _dt.utcnow().isoformat(),
+            })
+            logger.info("Synthèse sauvegardée.")
+        except Exception as e:
+            logger.error(f"Erreur lors de la génération de la synthèse : {e}")
 
     # Rapport de synthèse via LLM — toujours généré
     run_logs = "\n".join(_mem_handler.records)

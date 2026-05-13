@@ -11,6 +11,7 @@ env:
   GCP_REGION: europe-west1
   REGISTRY: europe-west1-docker.pkg.dev/tech-news-aggregator-001/tech-news-repo
   BACKEND_URL: https://backend-159654598910.europe-west1.run.app
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   # ─── Détection des changements ────────────────────────────────────────────

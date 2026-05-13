@@ -161,25 +161,6 @@ export default function AdminSettings({ token }: { token: string }) {
         </div>
       </div>
 
-      <div className="border-t pt-4 space-y-3">
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Centre d'intérêt pour la synthèse
-          </label>
-          <p className="text-xs text-gray-400 mb-2">
-            Après chaque collecte, le LLM produira une synthèse ciblée sur ce sujet.
-            Laisser vide pour désactiver.
-          </p>
-          <textarea
-            value={settings.interest ?? ""}
-            onChange={(e) => updateSettings({ ...settings!, interest: e.target.value })}
-            onBlur={() => saving || undefined}
-            placeholder="Ex: SDLC à l'aune de l'IA"
-            rows={2}
-            className="w-full border rounded px-3 py-2 text-sm text-gray-700 bg-white resize-none disabled:opacity-50"
-          />
-        </div>
-      </div>
 
     </div>
   );

@@ -29,6 +29,7 @@ export default function SynthesisPage() {
 
   const [interest, setInterest] = useState("");
   const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
 
   useEffect(() => {
     if (settingsData?.interest !== undefined) setInterest(settingsData.interest);
@@ -44,6 +45,8 @@ export default function SynthesisPage() {
     });
     mutateSettings();
     setSaving(false);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 3000);
   };
 
   if (status === "loading" || isLoading) {
@@ -91,6 +94,11 @@ export default function SynthesisPage() {
             >
               {saving ? "…" : "Sauvegarder"}
             </button>
+            {saved && (
+              <span className="text-sm font-medium" style={{ color: "#22c55e" }}>
+                ✓ Sauvegardé
+              </span>
+            )}
           </div>
         </div>
       </div>

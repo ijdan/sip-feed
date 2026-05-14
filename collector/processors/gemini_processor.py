@@ -407,6 +407,8 @@ def save_raw_articles(raw_articles: list[dict]) -> list[dict]:
             "long_description_fr": raw.get("raw_content", "")[:1000],
             "long_description_en": raw.get("raw_content", "")[:1000],
             "long_description": raw.get("raw_content", "")[:1000],
+            "keywords_fr": [],
+            "keywords_en": [],
             "article_url": raw["article_url"],
             "source_name": raw["source_name"],
             "source_id": raw["source_id"],

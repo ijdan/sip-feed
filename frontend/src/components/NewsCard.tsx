@@ -101,10 +101,6 @@ export default function NewsCard({
                 className="text-lg transition hover:scale-125" style={{ opacity: isFavorite ? 1 : 0.3 }}>⭐</button>
               <button onClick={(e) => { e.stopPropagation(); onReadingList?.(); }} title="Liste de lecture"
                 className="text-lg transition hover:scale-125" style={{ opacity: isInReadingList ? 1 : 0.3 }}>👓</button>
-              <div style={{ width: "1px", height: "16px", backgroundColor: "var(--border)" }} />
-              <button onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onDismiss?.(); }} title="Masquer"
-                className="text-base font-bold transition hover:scale-125"
-                style={{ color: "var(--text-muted)", opacity: 0.6 }}>✕</button>
             </div>
           )}
           <button

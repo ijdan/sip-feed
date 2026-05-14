@@ -93,7 +93,10 @@ echo "════════════════════════�
 echo -e "  Total : ${GREEN}$TOTAL_PASS passés${NC} | ${RED}$TOTAL_FAIL échoués${NC} | $TOTAL_SKIP ignorés / $TOTAL tests"
 if [ "$TOTAL_FAIL" -eq 0 ]; then
   echo -e "  ${GREEN}✅ Tous les tests passent — non-régression OK${NC}"
+  echo ""
+  exit 0
 else
-  echo -e "  ${RED}❌ $TOTAL_FAIL test(s) en échec — vérifier avant deploy${NC}"
+  echo -e "  ${RED}❌ $TOTAL_FAIL test(s) en échec — push et déploiement bloqués${NC}"
+  echo ""
+  exit 1
 fi
-echo ""

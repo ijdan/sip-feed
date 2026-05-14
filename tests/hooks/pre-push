@@ -1,0 +1,22 @@
+#!/bin/bash
+# Hook pre-push — bloque le push si les tests fonctionnels échouent
+
+ROOT="$(git rev-parse --show-toplevel)"
+
+echo ""
+echo "╔══════════════════════════════════════════╗"
+echo "║  🛡️  Vérification avant push             ║"
+echo "╚══════════════════════════════════════════╝"
+
+bash "$ROOT/tests/run-tests.sh"
+EXIT_CODE=$?
+
+if [ $EXIT_CODE -ne 0 ]; then
+  echo ""
+  echo "🚫 Push annulé — corrige les tests avant de pousser."
+  echo "   Pour forcer malgré tout : git push --no-verify"
+  echo ""
+  exit 1
+fi
+
+exit 0

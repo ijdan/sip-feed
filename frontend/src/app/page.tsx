@@ -238,44 +238,39 @@ export default function FeedPage() {
         <div className="flex gap-1 ml-1">
           <button
             onClick={() => setFilterFavorites(f => !f)}
-            title={`Favoris (${favorites.size})`}
+            title="Favoris"
             className="px-2.5 py-1.5 rounded-md border text-sm transition"
             style={{
               borderColor: filterFavorites ? "var(--accent)" : "var(--border)",
               backgroundColor: filterFavorites ? "var(--accent)" : "var(--surface)",
-              color: filterFavorites ? "var(--bg)" : favorites.size > 0 ? "var(--text)" : "var(--text-muted)",
-              opacity: favorites.size === 0 && !filterFavorites ? 0.4 : 1,
+              color: filterFavorites ? "var(--bg)" : "var(--text-muted)",
             }}
           >
-            ⭐{favorites.size > 0 && <span className="ml-1 text-xs">{favorites.size}</span>}
+            ⭐
           </button>
           <button
             onClick={() => setFilterReading(r => !r)}
-            title={`Liste de lecture (${readingList.size})`}
+            title="Liste de lecture"
             className="px-2.5 py-1.5 rounded-md border text-sm transition"
             style={{
               borderColor: filterReading ? "var(--accent)" : "var(--border)",
               backgroundColor: filterReading ? "var(--accent)" : "var(--surface)",
-              color: filterReading ? "var(--bg)" : readingList.size > 0 ? "var(--text)" : "var(--text-muted)",
-              opacity: readingList.size === 0 && !filterReading ? 0.4 : 1,
+              color: filterReading ? "var(--bg)" : "var(--text-muted)",
             }}
           >
-            👓{readingList.size > 0 && <span className="ml-1 text-xs">{readingList.size}</span>}
+            👓
           </button>
           <button
             onClick={() => setHideRead(h => !h)}
-            title={hideRead
-              ? `Afficher les articles lus (${readArticles.size})`
-              : `Masquer les articles lus (${readArticles.size})`}
+            title={hideRead ? "Afficher les articles lus" : "Masquer les articles lus"}
             className="px-2.5 py-1.5 rounded-md border text-sm transition"
             style={{
               borderColor: hideRead ? "var(--accent)" : "var(--border)",
               backgroundColor: hideRead ? "var(--accent)" : "var(--surface)",
-              color: hideRead ? "var(--bg)" : readArticles.size > 0 ? "var(--text)" : "var(--text-muted)",
-              opacity: readArticles.size === 0 && !hideRead ? 0.4 : 1,
+              color: hideRead ? "var(--bg)" : "var(--text-muted)",
             }}
           >
-            ✓{readArticles.size > 0 && <span className="ml-1 text-xs">{readArticles.size}</span>}
+            ✓
           </button>
         </div>
       </div>

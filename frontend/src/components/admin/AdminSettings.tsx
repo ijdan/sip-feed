@@ -44,6 +44,22 @@ export default function AdminSettings({ token }: { token: string }) {
   );
 
   const [saving, setSaving] = useState(false);
+  const [collecting, setCollecting] = useState(false);
+  const [collectMsg, setCollectMsg] = useState("");
+
+  const launchCollect = async () => {
+    setCollecting(true);
+    setCollectMsg("");
+    try {
+      await apiFetch("/admin/collect", token, { method: "POST" });
+      setCollectMsg("✓ Collecte lancée");
+    } catch {
+      setCollectMsg("✗ Erreur");
+    } finally {
+      setCollecting(false);
+      setTimeout(() => setCollectMsg(""), 4000);
+    }
+  };
 
   const updateSettings = async (updated: Settings) => {
     setSaving(true);
@@ -161,6 +177,21 @@ export default function AdminSettings({ token }: { token: string }) {
         </div>
       </div>
 
+      <div className="border-t pt-4 flex items-center gap-3">
+        <button
+          onClick={launchCollect}
+          disabled={collecting}
+          className="px-4 py-2 rounded text-sm font-medium transition disabled:opacity-50"
+          style={{ backgroundColor: "var(--text)", color: "var(--bg)" }}
+        >
+          {collecting ? "Lancement…" : "▶ Lancer la collecte"}
+        </button>
+        {collectMsg && (
+          <span className="text-sm font-medium" style={{ color: collectMsg.startsWith("✓") ? "#22c55e" : "#ef4444" }}>
+            {collectMsg}
+          </span>
+        )}
+      </div>
 
     </div>
   );

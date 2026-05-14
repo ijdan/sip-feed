@@ -234,15 +234,35 @@ def get_stats(_: dict = Depends(require_admin)):
 
 @router.get("/syntheses")
 def get_syntheses(_: dict = Depends(require_admin)):
-    """Retourne les synthèses des 3 derniers jours."""
+    """Retourne les synthèses des 3 derniers jours avec les articles cités."""
     from datetime import date, timedelta
     db = get_db()
     results = []
     for days_back in range(3):
         day = (date.today() - timedelta(days=days_back)).isoformat()
         doc = db.collection("syntheses").document(day).get()
-        if doc.exists:
-            results.append({"date": day, **doc.to_dict()})
+        if not doc.exists:
+            continue
+        data = doc.to_dict()
+        # Récupère les articles cités depuis Firestore
+        cited_ids = data.get("cited_ids", [])
+        cited_articles = []
+        for article_id in cited_ids:
+            a_doc = db.collection("articles").document(article_id).get()
+            if a_doc.exists:
+                a = a_doc.to_dict()
+                cited_articles.append({
+                    "id": article_id,
+                    "title_fr": a.get("title_fr") or a.get("title", ""),
+                    "title_en": a.get("title_en") or a.get("title", ""),
+                    "short_description_fr": a.get("short_description_fr", ""),
+                    "short_description_en": a.get("short_description_en", ""),
+                    "long_description_fr": a.get("long_description_fr", ""),
+                    "long_description_en": a.get("long_description_en", ""),
+                    "article_url": a.get("article_url", ""),
+                    "source_name": a.get("source_name", ""),
+                })
+        results.append({"date": day, **data, "cited_articles": cited_articles})
     return {"syntheses": results}
 
 

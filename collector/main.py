@@ -174,11 +174,12 @@ def run():
             logger.info(f"Génération de la synthèse pour : «{interest}»...")
             all_articles = list(db.collection("articles").order_by("collected_at", direction="DESCENDING").limit(100).stream())
             articles_for_synthesis = [doc.to_dict() for doc in all_articles]
-            synthesis = generate_synthesis(articles_for_synthesis, interest, model_priority)
+            result = generate_synthesis(articles_for_synthesis, interest, model_priority)
             from datetime import date as _date, datetime as _dt
             db.collection("syntheses").document(_date.today().isoformat()).set({
                 "interest": interest,
-                "content": synthesis,
+                "content": result["synthesis"],
+                "cited_ids": result["cited_ids"],
                 "articles_count": len(articles_for_synthesis),
                 "generated_at": _dt.utcnow().isoformat(),
             })

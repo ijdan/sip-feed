@@ -1,8 +1,9 @@
 "use client";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import useSWR from "swr";
+import { markdownToHtml } from "@/lib/markdownToHtml";
 
 const API = process.env.NEXT_PUBLIC_API_URL;
 
@@ -58,6 +59,20 @@ export default function SynthesisPage() {
       setSaving(false);
     }
   };
+
+  const [modalArticle, setModalArticle] = useState<any>(null);
+  const modalRef = useRef<HTMLDivElement>(null);
+  const lang = typeof window !== "undefined"
+    ? (localStorage.getItem("feed-lang") as "fr" | "en" || "fr")
+    : "fr";
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (modalRef.current && !modalRef.current.contains(e.target as Node)) setModalArticle(null);
+    };
+    if (modalArticle) document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [modalArticle]);
 
   if (status === "loading" || isLoading) {
     return <p className="mt-20 text-center" style={{ color: "var(--text-muted)" }}>Chargement…</p>;
@@ -135,15 +150,67 @@ export default function SynthesisPage() {
                 </p>
               </div>
             </div>
-            {/* Contenu */}
-            <div className="px-6 py-5 prose prose-sm max-w-none text-sm leading-relaxed whitespace-pre-wrap"
-              style={{ color: "var(--text)" }}>
-              {s.content === "⚠️ Synthèse indisponible — quota LLM épuisé."
-                ? <p style={{ color: "var(--text-muted)" }}>⚠️ Synthèse indisponible — quota LLM épuisé lors de cette exécution.</p>
-                : s.content}
-            </div>
+            {/* Contenu synthèse — rendu HTML depuis Markdown */}
+            <div className="px-6 py-5 text-sm leading-relaxed synthesis-content"
+              style={{ color: "var(--text)" }}
+              dangerouslySetInnerHTML={{
+                __html: s.content === "⚠️ Synthèse indisponible — quota LLM épuisé."
+                  ? `<p style="color:var(--text-muted)">⚠️ Synthèse indisponible — quota LLM épuisé lors de cette exécution.</p>`
+                  : markdownToHtml(s.content)
+              }}
+            />
+
+            {/* Articles cités */}
+            {s.cited_articles?.length > 0 && (
+              <div className="px-6 pb-5 border-t pt-4" style={{ borderColor: "var(--border)" }}>
+                <p className="text-xs font-medium mb-3" style={{ color: "var(--text-muted)" }}>
+                  📎 {s.cited_articles.length} article{s.cited_articles.length > 1 ? "s" : ""} cité{s.cited_articles.length > 1 ? "s" : ""}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {s.cited_articles.map((a: any) => (
+                    <button
+                      key={a.id}
+                      onClick={() => setModalArticle(a)}
+                      className="text-xs px-3 py-1.5 rounded-full border transition hover:opacity-70 text-left"
+                      style={{ backgroundColor: "var(--surface-2)", borderColor: "var(--border)", color: "var(--text)" }}
+                    >
+                      {lang === "en" ? (a.title_en || a.title_fr) : (a.title_fr || a.title_en)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         ))
+      )}
+      {/* Modal article cité */}
+      {modalArticle && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
+          <div ref={modalRef}
+            className="w-full max-w-lg rounded-xl border shadow-xl p-6 space-y-4"
+            style={{ backgroundColor: "var(--surface)", borderColor: "var(--border)" }}>
+            <div className="flex items-start justify-between gap-4">
+              <h3 className="font-semibold text-lg leading-snug" style={{ color: "var(--text)" }}>
+                {lang === "en" ? (modalArticle.title_en || modalArticle.title_fr) : (modalArticle.title_fr || modalArticle.title_en)}
+              </h3>
+              <button onClick={() => setModalArticle(null)}
+                className="shrink-0 text-lg hover:opacity-60 transition"
+                style={{ color: "var(--text-muted)" }}>✕</button>
+            </div>
+            <p className="text-xs" style={{ color: "var(--text-muted)" }}>{modalArticle.source_name}</p>
+            <p className="text-sm leading-relaxed" style={{ color: "var(--text)" }}>
+              {lang === "en"
+                ? (modalArticle.long_description_en || modalArticle.short_description_en)
+                : (modalArticle.long_description_fr || modalArticle.short_description_fr)}
+            </p>
+            <a href={modalArticle.article_url} target="_blank" rel="noopener noreferrer"
+              className="inline-block px-4 py-2 rounded text-sm font-medium transition hover:opacity-80"
+              style={{ backgroundColor: "var(--text)", color: "var(--bg)" }}>
+              {lang === "en" ? "Read article →" : "Lire l'article →"}
+            </a>
+          </div>
+        </div>
       )}
     </div>
   );

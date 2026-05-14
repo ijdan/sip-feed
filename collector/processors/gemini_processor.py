@@ -265,55 +265,62 @@ Tu es un analyste tech expert en veille stratégique.
 
 Centre d'intérêt : {interest}
 
-Tu disposes ci-dessous d'un corpus de {count} articles tech récemment collectés.
+Tu disposes ci-dessous d'un corpus de {count} articles tech récemment collectés,
+chacun identifié par un ID unique.
 Ton objectif : produire une synthèse de veille ciblée sur le centre d'intérêt indiqué,
 en t'appuyant UNIQUEMENT sur les articles fournis.
 
 Règles :
 - Ne retiens que les articles pertinents par rapport au centre d'intérêt
 - Si aucun article n'est pertinent, dis-le explicitement
-- Structure ta réponse en sections claires avec des émojis
-- Cite les titres d'articles pour étayer chaque point
+- Structure ta réponse avec des émojis
+- Référence les articles pertinents dans le texte avec leur titre
 - Ton analytique, factuel, orienté décision
 
-Structure attendue :
+Structure attendue pour la synthèse :
 
 **🔭 Vue d'ensemble**
 En 2-3 phrases : l'état du sujet à la lumière des articles collectés.
 
 **🔑 Points clés**
-Les 3 à 5 insights les plus importants en lien avec le centre d'intérêt,
-chacun illustré par un ou plusieurs articles du corpus.
+Les 3 à 5 insights les plus importants, chacun illustré par des articles du corpus.
 
 **📈 Tendances émergentes**
-Ce qui semble émerger ou évoluer sur ce sujet selon les articles.
-
-**📌 Articles les plus pertinents**
-Liste des 3 à 5 articles les plus directement en lien, avec une phrase d'explication.
+Ce qui semble émerger ou évoluer sur ce sujet.
 
 **❓ Ce qui manque**
-Angles ou questions liés au centre d'intérêt que les articles ne couvrent pas.
+Angles ou questions que les articles ne couvrent pas.
 
 ---
 Corpus ({count} articles) :
 {articles}
+
+---
+Réponds en JSON strict avec ces deux champs :
+{{
+  "synthesis": "le texte complet de la synthèse en markdown",
+  "cited_ids": ["id_article_1", "id_article_2", ...]
+}}
+cited_ids doit contenir uniquement les IDs des articles que tu as réellement utilisés.
 """
 
 
-def generate_synthesis(articles: list[dict], interest: str, model_priority: list[str] | None = None) -> str:
-    """Génère une synthèse ciblée sur le centre d'intérêt à partir des articles."""
+def generate_synthesis(articles: list[dict], interest: str, model_priority: list[str] | None = None) -> dict:
+    """Génère une synthèse ciblée. Retourne {synthesis, cited_ids}."""
     import logging
     logger = logging.getLogger(__name__)
 
     if not interest.strip():
-        return ""
+        return {"synthesis": "", "cited_ids": []}
 
     articles_text = ""
     for a in articles:
+        article_id = a.get("id", "")
         title = a.get("title_fr") or a.get("title", "")
-        desc = a.get("long_description_fr") or a.get("long_description", "")[:600]
-        articles_text += f"- {title}\n  {desc}\n\n"
+        desc = a.get("long_description_fr") or a.get("long_description", "")[:500]
+        articles_text += f"[ID:{article_id}] {title}\n{desc}\n\n"
 
+    config = {"temperature": 0.4, "max_output_tokens": 8000, "response_mime_type": "application/json"}
     prompt = SYNTHESIS_PROMPT.format(
         interest=interest,
         count=len(articles),
@@ -323,14 +330,18 @@ def generate_synthesis(articles: list[dict], interest: str, model_priority: list
     models_to_try = model_priority or DEFAULT_MODEL_PRIORITY
     for model_name in models_to_try:
         try:
-            m = genai.GenerativeModel(model_name, generation_config={"temperature": 0.4, "max_output_tokens": 8000})
+            m = genai.GenerativeModel(model_name, generation_config=config)
             response = m.generate_content(prompt)
-            logger.info(f"Synthèse générée par {model_name}")
-            return response.text.strip()
+            result = json.loads(response.text.strip())
+            logger.info(f"Synthèse générée par {model_name} — {len(result.get('cited_ids', []))} articles cités")
+            return {
+                "synthesis": result.get("synthesis", ""),
+                "cited_ids": result.get("cited_ids", []),
+            }
         except Exception as e:
             logger.warning(f"Synthèse : {model_name} indisponible ({e.__class__.__name__})")
 
-    return "⚠️ Synthèse indisponible — quota LLM épuisé."
+    return {"synthesis": "⚠️ Synthèse indisponible — quota LLM épuisé.", "cited_ids": []}
 
 
 REPORT_PROMPT = """

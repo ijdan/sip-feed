@@ -37,6 +37,16 @@ html.font-size-sm   { font-size: 13px; }
 html.font-size-md   { font-size: 16px; }
 html.font-size-lg   { font-size: 20px; }
 
+/* Rendu Markdown synthèse */
+.synthesis-content h1, .synthesis-content h2 { font-size: 1.1rem; font-weight: 700; margin: 1rem 0 0.4rem; }
+.synthesis-content h3 { font-size: 1rem; font-weight: 600; margin: 0.8rem 0 0.3rem; }
+.synthesis-content p { margin: 0.4rem 0; }
+.synthesis-content ul { list-style: disc; padding-left: 1.4rem; margin: 0.4rem 0; }
+.synthesis-content li { margin: 0.2rem 0; }
+.synthesis-content strong { font-weight: 600; }
+.synthesis-content em { font-style: italic; }
+.synthesis-content code { font-family: monospace; font-size: 0.85em; padding: 0.1em 0.3em; border-radius: 3px; background: var(--surface-2); }
+
 /* Dark mode — overrides globaux pour admin et composants non migrés */
 .dark .bg-white        { background-color: var(--surface) !important; }
 .dark .bg-gray-50      { background-color: var(--bg) !important; }

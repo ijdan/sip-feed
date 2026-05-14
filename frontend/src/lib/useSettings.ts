@@ -9,6 +9,7 @@ export interface UserSettings {
   excluded_categories: string[];
   excluded_sources: string[];
   hide_read: boolean;
+  default_lang: "fr" | "en";
 }
 
 const DEFAULTS: UserSettings = {
@@ -18,6 +19,7 @@ const DEFAULTS: UserSettings = {
   excluded_categories: [],
   excluded_sources: [],
   hide_read: false,
+  default_lang: "fr",
 };
 
 const API = process.env.NEXT_PUBLIC_API_URL;
@@ -55,6 +57,7 @@ function saveLocal(s: UserSettings) {
   localStorage.setItem("feed-excluded-sources", JSON.stringify(s.excluded_sources));
   localStorage.setItem("feed-excluded-categories", JSON.stringify(s.excluded_categories));
   localStorage.setItem("feed-hide-read", String(s.hide_read));
+  localStorage.setItem("settings-default-lang", s.default_lang);
 }
 
 function loadLocal(): UserSettings {
@@ -69,6 +72,7 @@ function loadLocal(): UserSettings {
     excluded_categories: JSON.parse(localStorage.getItem("feed-excluded-categories") || "[]"),
     excluded_sources: JSON.parse(localStorage.getItem("feed-excluded-sources") || "[]"),
     hide_read: localStorage.getItem("feed-hide-read") === "true",
+    default_lang: (localStorage.getItem("settings-default-lang") as "fr" | "en") || DEFAULTS.default_lang,
   };
 }
 

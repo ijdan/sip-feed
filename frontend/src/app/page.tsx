@@ -24,7 +24,7 @@ export default function FeedPage() {
   const token = (session as any)?.accessToken as string | undefined;
   const { settings } = useSettings();
   const [columns, setColumns] = useState<number>(1);
-  const [lang, setLang] = useState<"fr" | "en">("fr");
+  const [lang, setLang] = useState<"fr" | "en">("fr"); // session uniquement, ne persiste pas
   const [excludedSources, setExcludedSources] = useState<Set<string>>(new Set());
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const {
@@ -42,8 +42,7 @@ export default function FeedPage() {
   useEffect(() => {
     const savedCols = localStorage.getItem("feed-columns");
     if (savedCols) setColumns(Number(savedCols));
-    const savedLang = localStorage.getItem("feed-lang");
-    if (savedLang === "en" || savedLang === "fr") setLang(savedLang);
+    // La langue est initialisée depuis les settings (voir useEffect sur settings ci-dessous)
     const savedExcSrc = localStorage.getItem("feed-excluded-sources");
     if (savedExcSrc) setExcludedSources(new Set(JSON.parse(savedExcSrc)));
     const savedCat = localStorage.getItem("feed-selected-category");
@@ -56,6 +55,7 @@ export default function FeedPage() {
     setColumns(settings.columns);
     setExcludedSources(new Set(settings.excluded_sources));
     setHideRead(settings.hide_read ?? false);
+    setLang(settings.default_lang as "fr" | "en" ?? "fr"); // langue par défaut depuis settings
   }, [settings]);
 
   const changeColumns = (n: number) => {
@@ -64,8 +64,7 @@ export default function FeedPage() {
   };
 
   const changeLang = (l: "fr" | "en") => {
-    setLang(l);
-    localStorage.setItem("feed-lang", l);
+    setLang(l); // session uniquement — ne modifie pas settings.default_lang
   };
 
   const toggleSource = (key: string) => {

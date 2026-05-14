@@ -33,3 +33,4 @@ class UserSettings(BaseModel):
     excluded_categories: list[str] = []
     excluded_sources: list[str] = []
     hide_read: bool = False
+    default_lang: str = "fr"

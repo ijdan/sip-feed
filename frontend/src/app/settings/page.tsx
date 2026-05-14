@@ -62,6 +62,19 @@ export default function SettingsPage() {
             ))}
           </div>
         </Row>
+        <Row label="Langue par défaut">
+          <div className="flex border rounded-md overflow-hidden" style={{ borderColor: "var(--border)" }}>
+            {(["fr", "en"] as const).map(l => (
+              <button key={l} onClick={() => { update({ default_lang: l }); flash(); }}
+                className="px-4 py-1.5 text-sm font-medium transition"
+                style={settings.default_lang === l
+                  ? { backgroundColor: "var(--text)", color: "var(--bg)" }
+                  : { backgroundColor: "var(--surface)", color: "var(--text-muted)" }}>
+                {l.toUpperCase()}
+              </button>
+            ))}
+          </div>
+        </Row>
         <Row label="Masquer les articles lus">
           <button
             onClick={() => { update({ hide_read: !settings.hide_read }); flash(); }}

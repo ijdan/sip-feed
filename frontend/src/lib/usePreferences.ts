@@ -52,7 +52,7 @@ function saveLocal(
 
 export function usePreferences() {
   const { data: session } = useSession();
-  const token = (session as any)?.accessToken as string | undefined;
+  const token = ((session as unknown) as import("@/lib/types").AppSession)?.accessToken as string | undefined;
 
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [readingList, setReadingList] = useState<Set<string>>(new Set());

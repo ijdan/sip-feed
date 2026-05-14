@@ -9,8 +9,8 @@ const API = process.env.NEXT_PUBLIC_API_URL;
 export default function StatsPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
-  const token = (session as any)?.accessToken;
-  const role = (session as any)?.role;
+  const token = ((session as unknown) as import("@/lib/types").AppSession)?.accessToken;
+  const role = ((session as unknown) as import("@/lib/types").AppSession)?.role;
 
   useEffect(() => {
     if (status === "unauthenticated") router.replace("/login");

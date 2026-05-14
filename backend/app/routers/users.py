@@ -1,3 +1,6 @@
+import logging
+logger = logging.getLogger(__name__)
+
 from fastapi import APIRouter, Depends, HTTPException
 from app.auth.google_oauth import verify_jwt
 from app.db.firestore import get_db

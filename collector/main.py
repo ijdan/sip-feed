@@ -1,5 +1,6 @@
 import logging
 import os
+from datetime import datetime, date, timedelta
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -58,8 +59,7 @@ def apply_retention(retention_days: int) -> int:
     """Supprime les articles plus anciens que retention_days. Retourne le nombre supprimé."""
     if retention_days <= 0:
         return 0
-    from datetime import datetime as _dt, timedelta
-    cutoff = (_dt.utcnow() - timedelta(days=retention_days)).isoformat()
+    cutoff = (datetime.utcnow() - timedelta(days=retention_days)).isoformat()
     docs = list(db.collection("articles").where("collected_at", "<", cutoff).stream())
     if not docs:
         return 0
@@ -175,13 +175,12 @@ def run():
             all_articles = list(db.collection("articles").order_by("collected_at", direction="DESCENDING").limit(100).stream())
             articles_for_synthesis = [doc.to_dict() for doc in all_articles]
             result = generate_synthesis(articles_for_synthesis, interest, model_priority)
-            from datetime import date as _date, datetime as _dt
-            db.collection("syntheses").document(_date.today().isoformat()).set({
+            db.collection("syntheses").document(date.today().isoformat()).set({
                 "interest": interest,
                 "content": result["synthesis"],
                 "cited_ids": result["cited_ids"],
                 "articles_count": len(articles_for_synthesis),
-                "generated_at": _dt.utcnow().isoformat(),
+                "generated_at": datetime.utcnow().isoformat(),
             })
             logger.info("Synthèse sauvegardée.")
         except Exception as e:
@@ -192,10 +191,9 @@ def run():
     report = generate_run_report(run_logs, model_priority)
 
     # Persistance du rapport dans Firestore
-    from datetime import datetime as _dt
     db.collection("reports").document("latest").set({
         "content": report,
-        "generated_at": _dt.utcnow().isoformat(),
+        "generated_at": datetime.utcnow().isoformat(),
     })
     logger.info("📋 Rapport d'exécution généré et sauvegardé.")
 

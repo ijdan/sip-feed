@@ -19,6 +19,18 @@ DEFAULT_MODEL_PRIORITY = [
 
 CATEGORIES = ["IA", "DevOps", "Cloud", "Sécurité", "Dev", "IT", "Autre"]
 
+# Limites de contenu pour les prompts LLM
+MAX_ARTICLE_CONTENT_FOR_BATCH = 1500    # chars max par article dans le prompt batch
+MAX_GMAIL_CONTENT_FOR_PROMPT = 50_000  # chars max pour l'extraction Gmail
+MAX_SYNTHESIS_INPUT = 180_000           # chars max pour le prompt de synthèse
+MAX_REPORT_LOGS = 8_000                 # chars max des logs pour le rapport
+FALLBACK_SHORT_DESC_LENGTH = 200        # chars max short_description (fallback brut)
+FALLBACK_LONG_DESC_LENGTH = 1_000       # chars max long_description (fallback brut)
+LLM_TEMPERATURE = 0.4                   # Température génération LLM
+LLM_MAX_TOKENS_BATCH = 60_000           # Max tokens pour batch d'articles
+LLM_MAX_TOKENS_SYNTHESIS = 8_000        # Max tokens pour la synthèse
+TITLE_LOG_MAX_LENGTH = 60               # Longueur max des titres dans les logs
+
 BATCH_PROMPT_BILINGUAL = """
 Tu es journaliste tech bilingue (français / anglais).
 Pour chaque article ci-dessous, produis simultanément deux fiches : une en français, une en anglais.
@@ -174,8 +186,8 @@ Réponds UNIQUEMENT avec un tableau JSON valide. Si aucun lien pertinent, retour
 
 
 BASE_GENERATION_CONFIG = {
-    "temperature": 0.4,
-    "max_output_tokens": 60000,
+    "temperature": LLM_TEMPERATURE,
+    "max_output_tokens": LLM_MAX_TOKENS_BATCH,
     "response_mime_type": "application/json",
 }
 
@@ -320,7 +332,7 @@ def generate_synthesis(articles: list[dict], interest: str, model_priority: list
         desc = a.get("long_description_fr") or a.get("long_description", "")[:500]
         articles_text += f"[ID:{article_id}] {title}\n{desc}\n\n"
 
-    config = {"temperature": 0.4, "max_output_tokens": 8000, "response_mime_type": "application/json"}
+    config = {"temperature": LLM_TEMPERATURE, "max_output_tokens": LLM_MAX_TOKENS_SYNTHESIS, "response_mime_type": "application/json"}
     prompt = SYNTHESIS_PROMPT.format(
         interest=interest,
         count=len(articles),

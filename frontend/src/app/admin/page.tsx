@@ -8,8 +8,8 @@ import LogViewer from "@/components/admin/LogViewer";
 export default function AdminPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
-  const role = (session as any)?.role;
-  const token = (session as any)?.accessToken;
+  const role = ((session as unknown) as import("@/lib/types").AppSession)?.role;
+  const token = ((session as unknown) as import("@/lib/types").AppSession)?.accessToken;
 
   if (status === "unauthenticated") {
     router.replace("/login");

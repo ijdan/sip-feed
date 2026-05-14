@@ -21,7 +21,7 @@ const COLUMN_CLASSES: Record<number, string> = {
 
 export default function FeedPage() {
   const { data: session, status: sessionStatus } = useSession();
-  const token = (session as any)?.accessToken as string | undefined;
+  const token = ((session as unknown) as import("@/lib/types").AppSession)?.accessToken as string | undefined;
   const { settings } = useSettings();
   const [columns, setColumns] = useState<number>(1);
   const [lang, setLang] = useState<"fr" | "en">("fr"); // session uniquement, ne persiste pas

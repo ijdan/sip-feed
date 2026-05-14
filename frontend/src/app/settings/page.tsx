@@ -12,7 +12,7 @@ const FONT_LABELS: Record<string, string> = { sm: "Petite", md: "Moyenne", lg: "
 
 export default function SettingsPage() {
   const { data: session, status } = useSession();
-  const token = (session as any)?.accessToken as string | undefined;
+  const token = ((session as unknown) as import("@/lib/types").AppSession)?.accessToken as string | undefined;
   const router = useRouter();
   const { settings, update } = useSettings();
   const [sources, setSources] = useState<string[]>([]);

@@ -1,3 +1,6 @@
+import logging
+logger = logging.getLogger(__name__)
+
 from fastapi import APIRouter, HTTPException, Query
 from google.cloud.firestore_v1.aggregation import AggregationQuery
 from app.db.firestore import get_db

@@ -78,7 +78,7 @@ function loadLocal(): UserSettings {
 
 export function useSettings() {
   const { data: session } = useSession();
-  const token = (session as any)?.accessToken as string | undefined;
+  const token = ((session as unknown) as import("@/lib/types").AppSession)?.accessToken as string | undefined;
   const [settings, setSettings] = useState<UserSettings>(DEFAULTS);
   const [loaded, setLoaded] = useState(false);
 

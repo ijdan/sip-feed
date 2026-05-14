@@ -4,7 +4,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
 import jwt
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from app.config import settings
 from app.db.firestore import get_db
@@ -22,7 +22,7 @@ def create_jwt(internal_id: str, email: str, role: str = "reader") -> str:
         "sub": internal_id,   # identifiant interne stable
         "email": email,
         "role": role,
-        "exp": datetime.utcnow() + timedelta(minutes=settings.jwt_expire_minutes),
+        "exp": datetime.now(timezone.utc) + timedelta(minutes=settings.jwt_expire_minutes),
     }
     return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 
@@ -57,7 +57,7 @@ def _upsert_user(email: str, name: str, avatar: str, provider: str) -> tuple[str
         user_ref.set({
             "internal_id": internal_id, "email": email, "name": name,
             "avatar": avatar, "role": "reader", "provider": provider,
-            "created_at": datetime.utcnow().isoformat(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
         })
         return internal_id, "reader"
     data = user_doc.to_dict()

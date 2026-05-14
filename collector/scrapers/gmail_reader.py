@@ -60,58 +60,50 @@ def _parse_tldr_articles(body: str) -> list[dict]:
       Links:
       [N] https://url
     """
-    # 1. Extraire les liens numérotés depuis la section "Links:"
-    links: dict[str, str] = {}
-    for m in re.finditer(r'\[(\d+)\]\s+(https?://\S+)', body):
-        links[m.group(1)] = m.group(2).rstrip('.')
-
-    # 2. Travailler uniquement sur le contenu avant "Links:"
-    links_idx = body.rfind('Links:')
-    content = body[:links_idx] if links_idx > 0 else body
-
-    # 3. Découper en paragraphes
-    paragraphs = [
-        re.sub(r'\s+', ' ', p).strip()
-        for p in re.split(r'\r?\n\s*\r?\n', content)
-    ]
-
+    links = _extract_numbered_links(body)
+    paragraphs = _split_into_paragraphs(body)
     articles = []
+
     for i, p in enumerate(paragraphs):
-        # Format attendu : "Title (META) [N]"
         m = re.match(r'^(.+?)\s*\(([^)]+)\)\s*\[(\d+)\]\s*$', p)
         if not m:
             continue
-
-        title = m.group(1).strip()
-        meta = m.group(2).strip().upper()
-        link_num = m.group(3)
-
-        # Ignorer les sponsors
-        if 'SPONSOR' in meta or 'SPONSOR' in title.upper():
+        title, meta, link_num = m.group(1).strip(), m.group(2).strip().upper(), m.group(3)
+        if not _is_valid_tldr_entry(title, meta):
             continue
-
-        # Garder seulement les articles avec temps de lecture ou GitHub
-        has_read_time = bool(re.search(r'\d+\s+MINUTE\s+READ', meta))
-        is_github = 'GITHUB REPO' in meta
-        if not has_read_time and not is_github:
-            continue
-
-        # Description = paragraphe suivant (doit être substantiel)
         detail = (paragraphs[i + 1] if i + 1 < len(paragraphs) else '').strip()
         if not detail or len(detail) < 30:
             continue
-
         url = links.get(link_num, '')
         if not url:
             continue
-
-        articles.append({
-            'title': title,
-            'raw_content': detail,
-            'article_url': url,
-        })
+        articles.append({'title': title, 'raw_content': detail, 'article_url': url})
 
     return articles
+
+
+def _extract_numbered_links(body: str) -> dict[str, str]:
+    """Extrait le dictionnaire [N] → URL depuis la section Links: du corps TLDR."""
+    return {
+        m.group(1): m.group(2).rstrip('.')
+        for m in re.finditer(r'\[(\d+)\]\s+(https?://\S+)', body)
+    }
+
+
+def _split_into_paragraphs(body: str) -> list[str]:
+    """Découpe le corps de l'email en paragraphes (avant la section Links:)."""
+    links_idx = body.rfind('Links:')
+    content = body[:links_idx] if links_idx > 0 else body
+    return [re.sub(r'\s+', ' ', p).strip() for p in re.split(r'\r?\n\s*\r?\n', content)]
+
+
+def _is_valid_tldr_entry(title: str, meta_upper: str) -> bool:
+    """Vérifie qu'une entrée TLDR est un vrai article (pas un sponsor, pas sans durée de lecture)."""
+    if 'SPONSOR' in meta_upper or 'SPONSOR' in title.upper():
+        return False
+    has_read_time = bool(re.search(r'\d+\s+MINUTE\s+READ', meta_upper))
+    is_github = 'GITHUB REPO' in meta_upper
+    return has_read_time or is_github
 
 
 def read_gmail_source(source: dict, lookback_days: int = 1) -> list[dict]:

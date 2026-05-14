@@ -78,19 +78,19 @@ Réponds avec un tableau JSON de {count} objets dans le même ordre :
 
 
 
+def _format_articles_for_batch_prompt(raw_articles: list[dict]) -> str:
+    """Formate les articles bruts pour le prompt batch Gemini."""
+    return "".join(
+        f"[{i}]\nTITRE: {raw['title']}\nCONTENU: {raw.get('raw_content', '')[:MAX_ARTICLE_CONTENT_FOR_BATCH]}\n\n"
+        for i, raw in enumerate(raw_articles)
+    )
+
+
 def enrich_articles_batch(raw_articles: list[dict], model_priority: list[str] | None = None, thinking: bool = True, **_) -> list[dict]:
     """Traite tous les articles en un seul appel Gemini — produit FR + EN simultanément."""
-    articles_text = ""
-    for i, raw in enumerate(raw_articles):
-        articles_text += (
-            f"[{i}]\n"
-            f"TITRE: {raw['title']}\n"
-            f"CONTENU: {raw.get('raw_content', '')[:1500]}\n\n"
-        )
-
     prompt = BATCH_PROMPT_BILINGUAL.format(
         count=len(raw_articles),
-        articles=articles_text,
+        articles=_format_articles_for_batch_prompt(raw_articles),
         categories=", ".join(CATEGORIES),
     )
 

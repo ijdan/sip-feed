@@ -13,7 +13,10 @@ from google.cloud import firestore
 
 from scrapers.web_scraper import scrape_source
 from scrapers.gmail_reader import read_gmail_source
-from processors.gemini_processor import enrich_articles_batch, save_raw_articles, generate_run_report, generate_synthesis
+from processors.gemini_processor import (
+    enrich_articles_batch, save_raw_articles, generate_run_report,
+    generate_synthesis, TITLE_LOG_MAX_LENGTH,
+)
 
 # Handler pour capturer les logs en mémoire
 class _MemoryHandler(logging.Handler):
@@ -102,8 +105,21 @@ def run():
         logger.info(f"  [{s['type'].upper()}] {s['name']} — {detail}")
 
     # Étape 1 : collecte brute depuis toutes les sources
-    all_raw = []
-    seen_urls = set()  # déduplication en mémoire + DB
+    all_raw: list[dict] = []
+    seen_urls: set[str] = set()
+
+    def _add_articles_to_batch(articles: list[dict]) -> None:
+        """Ajoute les articles au batch avec déduplication et logging. Modifie all_raw et seen_urls."""
+        for raw in articles:
+            if len(all_raw) >= MAX_ARTICLES_PER_RUN:
+                break
+            url = raw["article_url"]
+            if url in seen_urls or already_exists(url):
+                logger.info(f"  Déjà collecté, ignoré : {raw['title'][:TITLE_LOG_MAX_LENGTH]}")
+                continue
+            seen_urls.add(url)
+            all_raw.append(raw)
+            logger.info(f"  Nouveau : {raw['title'][:TITLE_LOG_MAX_LENGTH]}")
 
     for doc in sources:
         source = doc.to_dict()
@@ -112,31 +128,9 @@ def run():
 
         try:
             if source["type"] == "web":
-                raw_articles = scrape_source(source)
-                for raw in raw_articles:
-                    if len(all_raw) >= MAX_ARTICLES_PER_RUN:
-                        break
-                    url = raw["article_url"]
-                    if url in seen_urls or already_exists(url):
-                        logger.info(f"  Déjà collecté, ignoré : {raw['title'][:60]}")
-                        continue
-                    seen_urls.add(url)
-                    all_raw.append(raw)
-                    logger.info(f"  Nouveau : {raw['title'][:60]}")
-
+                _add_articles_to_batch(scrape_source(source))
             elif source["type"] == "gmail":
-                raw_articles = read_gmail_source(source, lookback_days=gmail_lookback_days)
-                for raw in raw_articles:
-                    if len(all_raw) >= MAX_ARTICLES_PER_RUN:
-                        break
-                    url = raw["article_url"]
-                    if url in seen_urls or already_exists(url):
-                        logger.info(f"  Déjà collecté, ignoré : {raw['title'][:60]}")
-                        continue
-                    seen_urls.add(url)
-                    all_raw.append(raw)
-                    logger.info(f"  Nouveau : {raw['title'][:60]}")
-
+                _add_articles_to_batch(read_gmail_source(source, lookback_days=gmail_lookback_days))
         except Exception as e:
             logger.error(f"Erreur source {source['name']}: {e}")
 

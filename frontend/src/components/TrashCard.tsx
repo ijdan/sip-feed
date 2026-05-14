@@ -1,5 +1,5 @@
 "use client";
-import { useState, useRef } from "react";
+import { useDragSwipe } from "@/lib/useDragSwipe";
 import { categoryLabel } from "@/lib/categories";
 
 const RESTORE_THRESHOLD = 100;
@@ -21,35 +21,16 @@ interface Props {
 }
 
 export default function TrashCard({ article, lang = "fr", onRestore }: Props) {
-  const [dragX, setDragX] = useState(0);
-  const [dragging, setDragging] = useState(false);
-  const [restoring, setRestoring] = useState(false);
-  const startX = useRef(0);
   const color = CATEGORY_COLORS[article.category] ?? CATEGORY_COLORS["Autre"];
-
   const title = lang === "en" ? (article.title_en || article.title) : (article.title_fr || article.title);
   const shortDesc = lang === "en"
     ? (article.short_description_en || article.short_description)
     : (article.short_description_fr || article.short_description);
 
-  const triggerRestore = () => {
-    setRestoring(true);
-    setTimeout(() => onRestore(), 250);
-  };
-
-  const onDragStart = (clientX: number) => { startX.current = clientX; setDragging(true); };
-  const onDragMove = (clientX: number) => {
-    if (!dragging) return;
-    const delta = clientX - startX.current;
-    if (delta < 0) setDragX(delta); // droite→gauche uniquement
-  };
-  const onDragEnd = () => {
-    if (dragX < -RESTORE_THRESHOLD) triggerRestore();
-    else setDragX(0);
-    setDragging(false);
-  };
-
-  const progress = Math.min(1, Math.abs(dragX) / RESTORE_THRESHOLD);
+  const { dragX, dismissed: restoring, swipingLeft, leftProgress: progress, handlers } = useDragSwipe({
+    dismissThreshold: RESTORE_THRESHOLD,
+    onDismiss: onRestore, // dans la corbeille, swipe = restaurer
+  });
 
   return (
     <div className="relative overflow-hidden rounded-lg">
@@ -73,17 +54,11 @@ export default function TrashCard({ article, lang = "fr", onRestore }: Props) {
           borderColor: "var(--border)",
           transform: restoring ? "translateX(-110%)" : `translateX(${dragX}px)`,
           opacity: restoring ? 0 : 0.45,
-          transition: dragging ? "none" : "transform 0.25s ease, opacity 0.25s ease",
+          transition: dragX !== 0 ? "none" : "transform 0.25s ease, opacity 0.25s ease",
           cursor: dragX < 0 ? "grabbing" : "auto",
         }}
         className="rounded-lg border p-4 space-y-2 select-none"
-        onTouchStart={(e) => onDragStart(e.touches[0].clientX)}
-        onTouchMove={(e) => onDragMove(e.touches[0].clientX)}
-        onTouchEnd={onDragEnd}
-        onMouseDown={(e) => onDragStart(e.clientX)}
-        onMouseMove={(e) => onDragMove(e.clientX)}
-        onMouseUp={onDragEnd}
-        onMouseLeave={() => { if (dragging) onDragEnd(); }}
+        {...handlers}
       >
         <div className="flex items-start justify-between gap-3">
           <h2 className="text-sm font-semibold leading-snug" style={{ color: "var(--text)" }}>{title}</h2>

@@ -1,9 +1,7 @@
 "use client";
-import { useState, useRef } from "react";
+import { useState } from "react";
 import { categoryLabel } from "@/lib/categories";
-
-const DISMISS_THRESHOLD = 120;
-const READ_THRESHOLD = 100;
+import { useDragSwipe } from "@/lib/useDragSwipe";
 
 const CATEGORY_COLORS: Record<string, string> = {
   IA: "bg-purple-100 text-purple-800",
@@ -34,39 +32,17 @@ export default function NewsCard({
 }: Props) {
   const [expanded, setExpanded] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [dragX, setDragX] = useState(0);
-  const [dragging, setDragging] = useState(false);
-  const [dismissed, setDismissedAnim] = useState(false);
-  const startX = useRef(0);
   const color = CATEGORY_COLORS[article.category] ?? CATEGORY_COLORS["Autre"];
 
-  const triggerDismiss = () => {
-    setDismissedAnim(true);
-    setMenuOpen(false);
-    setTimeout(() => onDismiss?.(), 250);
-  };
-
-  const onDragStart = (clientX: number) => { startX.current = clientX; setDragging(true); };
-  const onDragMove = (clientX: number) => {
-    if (!dragging) return;
-    const delta = clientX - startX.current;
-    setDragX(delta); // les deux directions
-  };
-  const onDragEnd = () => {
-    if (dragX < -DISMISS_THRESHOLD) triggerDismiss();
-    else if (dragX > READ_THRESHOLD) { onMarkRead?.(); setDragX(0); }
-    else setDragX(0);
-    setDragging(false);
-  };
+  const { dragX, dragging, dismissed, swipingLeft, swipingRight, leftProgress, rightProgress, handlers } = useDragSwipe({
+    onDismiss: () => { setMenuOpen(false); onDismiss?.(); },
+    onMarkRead,
+    isRead,
+  });
 
   const title = lang === "en" ? (article.title_en || article.title) : (article.title_fr || article.title);
   const shortDesc = lang === "en" ? (article.short_description_en || article.short_description) : (article.short_description_fr || article.short_description);
   const longDesc = lang === "en" ? (article.long_description_en || article.long_description) : (article.long_description_fr || article.long_description);
-
-  const swipingLeft = dragX < -20;
-  const swipingRight = dragX > 20;
-  const leftProgress = Math.min(1, Math.abs(dragX) / DISMISS_THRESHOLD);
-  const rightProgress = Math.min(1, dragX / READ_THRESHOLD);
 
   return (
     <div className="relative overflow-hidden rounded-lg">
@@ -111,13 +87,7 @@ export default function NewsCard({
           cursor: dragX !== 0 ? "grabbing" : "auto",
         }}
         className="relative rounded-lg border p-5 shadow-sm space-y-3 group select-none"
-        onTouchStart={(e) => onDragStart(e.touches[0].clientX)}
-        onTouchMove={(e) => onDragMove(e.touches[0].clientX)}
-        onTouchEnd={onDragEnd}
-        onMouseDown={(e) => onDragStart(e.clientX)}
-        onMouseMove={(e) => onDragMove(e.clientX)}
-        onMouseUp={onDragEnd}
-        onMouseLeave={() => { if (dragging) onDragEnd(); }}
+        {...handlers}
       >
         {/* Bouton menu ⋯ */}
         <div className="absolute top-2 right-2 flex items-center gap-1">
@@ -131,7 +101,7 @@ export default function NewsCard({
               <button onClick={(e) => { e.stopPropagation(); onReadingList?.(); }} title="Liste de lecture"
                 className="text-lg transition hover:scale-125" style={{ opacity: isInReadingList ? 1 : 0.3 }}>👓</button>
               <div style={{ width: "1px", height: "16px", backgroundColor: "var(--border)" }} />
-              <button onClick={(e) => { e.stopPropagation(); triggerDismiss(); }} title="Masquer"
+              <button onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onDismiss?.(); }} title="Masquer"
                 className="text-base font-bold transition hover:scale-125"
                 style={{ color: "var(--text-muted)", opacity: 0.6 }}>✕</button>
             </div>

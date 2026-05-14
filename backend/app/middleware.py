@@ -16,8 +16,8 @@ def _extract_identifier(request: Request) -> str:
                 auth[7:], settings.jwt_secret, algorithms=[settings.jwt_algorithm]
             )
             return payload.get("email", "inconnu")
-        except Exception:
-            pass
+        except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
+            pass  # Token invalide ou expiré → visiteur anonyme
     # Visiteur non authentifié : IP
     ip = request.headers.get("X-Forwarded-For", request.client.host if request.client else "unknown")
     return f"ip:{ip.split(',')[0].strip()}"
@@ -35,8 +35,11 @@ async def _log_call(identifier: str):
         counts = doc.to_dict() if doc.exists else {}
         counts[identifier] = counts.get(identifier, 0) + 1
         ref.set(counts)
-    except Exception:
-        pass  # Les stats ne doivent jamais bloquer l'application
+    except (ConnectionError, TimeoutError, OSError):
+        pass  # Erreurs réseau/Firestore transitoires — les stats ne bloquent pas
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).debug(f"Stats tracking skipped: {e}")
 
 
 class StatsMiddleware(BaseHTTPMiddleware):

@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException, Query
+from google.cloud.firestore_v1.aggregation import AggregationQuery
 from app.db.firestore import get_db
 from app.models.article import Article, ArticleList
 
@@ -22,6 +23,16 @@ def articles_stats():
     return {"total": total, "by_category": counts}
 
 
+def _count_query(query) -> int:
+    """Compte les documents d'une requête Firestore via aggregation (sans les charger)."""
+    try:
+        result = query.count().get()
+        return result[0][0].value
+    except Exception:
+        # Fallback si count() non supporté (émulateur ancien)
+        return len(list(query.stream()))
+
+
 @router.get("/")
 def list_articles(
     category: str | None = Query(None),
@@ -37,10 +48,12 @@ def list_articles(
     if source_id:
         query = query.where("source_id", "==", source_id)
 
-    all_docs = list(query.stream())
-    total = len(all_docs)
+    # C1 : total via aggregation (pas de chargement en mémoire)
+    total = _count_query(query)
+
+    # Fetch uniquement la page demandée
     start = (page - 1) * page_size
-    page_docs = all_docs[start: start + page_size]
+    page_docs = list(query.offset(start).limit(page_size).stream())
 
     items = [Article(**{**doc.to_dict(), "id": doc.id}) for doc in page_docs]
     return ArticleList(items=items, total=total, page=page, page_size=page_size)

@@ -30,8 +30,8 @@ export default function SearchBar({ terms, onAdd, onRemove, suggestions, lang = 
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  // Suggestions filtrées : contiennent les lettres saisies, pas déjà sélectionnées
-  const filtered = input.length >= MIN_CHARS
+  // Suggestions filtrées : mots-clés contenant les lettres saisies, pas déjà sélectionnés
+  const filteredSuggestions = input.length >= MIN_CHARS
     ? suggestions
         .filter(s =>
           s.toLowerCase().includes(input.toLowerCase()) &&
@@ -52,10 +52,10 @@ export default function SearchBar({ terms, onAdd, onRemove, suggestions, lang = 
   }, [terms, onAdd]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (open && filtered.length > 0) {
+    if (open && filteredSuggestions.length > 0) {
       if (e.key === "ArrowDown") {
         e.preventDefault();
-        setHighlightedIndex(i => Math.min(i + 1, filtered.length - 1));
+        setHighlightedIndex(i => Math.min(i + 1, filteredSuggestions.length - 1));
         return;
       }
       if (e.key === "ArrowUp") {
@@ -65,7 +65,7 @@ export default function SearchBar({ terms, onAdd, onRemove, suggestions, lang = 
       }
       if (e.key === "Enter" && highlightedIndex >= 0) {
         e.preventDefault();
-        addTerm(filtered[highlightedIndex]);
+        addTerm(filteredSuggestions[highlightedIndex]);
         return;
       }
     }
@@ -138,12 +138,12 @@ export default function SearchBar({ terms, onAdd, onRemove, suggestions, lang = 
       </div>
 
       {/* Dropdown suggestions */}
-      {open && filtered.length > 0 && (
+      {open && filteredSuggestions.length > 0 && (
         <div
           className="absolute left-0 right-0 top-full mt-1 rounded-lg border shadow-lg z-50 overflow-hidden"
           style={{ backgroundColor: "var(--surface)", borderColor: "var(--border)" }}
         >
-          {filtered.map((s, idx) => {
+          {filteredSuggestions.map((s, idx) => {
             const charIdx = s.toLowerCase().indexOf(input.toLowerCase());
             const isHighlighted = idx === highlightedIndex;
             return (

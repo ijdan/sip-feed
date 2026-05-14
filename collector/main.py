@@ -131,8 +131,14 @@ def run():
                 _add_articles_to_batch(scrape_source(source))
             elif source["type"] == "gmail":
                 _add_articles_to_batch(read_gmail_source(source, lookback_days=gmail_lookback_days))
+        except ConnectionError as e:
+            logger.warning(f"Erreur réseau source {source['name']} — sera retenté au prochain run : {e}")
+        except TimeoutError as e:
+            logger.warning(f"Timeout source {source['name']} — sera retenté au prochain run : {e}")
+        except ValueError as e:
+            logger.error(f"Erreur parsing source {source['name']} (données corrompues ?) : {e}")
         except Exception as e:
-            logger.error(f"Erreur source {source['name']}: {e}")
+            logger.error(f"Erreur inattendue source {source['name']} : {type(e).__name__}: {e}")
 
     articles_collected = 0
 

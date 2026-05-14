@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { categoryLabel } from "@/lib/categories";
 import { useDragSwipe } from "@/lib/useDragSwipe";
+import { formatDate } from "@/lib/types";
 
 const CATEGORY_COLORS: Record<string, string> = {
   IA: "bg-purple-100 text-purple-800",
@@ -132,7 +133,7 @@ export default function NewsCard({
         <div className="flex items-center justify-between text-xs pt-1" style={{ color: "var(--text-muted)" }}>
           <div className="flex gap-3">
             <span>{article.source_name}</span><span>·</span>
-            <span>{new Date(article.published_at).toLocaleDateString("fr-FR")}</span>
+            <span>{formatDate(article.published_at, lang)}</span>
             {isRead && <span className="opacity-50">· {lang === "en" ? "Read" : "Lu"}</span>}
           </div>
           <a href={article.article_url} target="_blank" rel="noopener noreferrer"

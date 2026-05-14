@@ -34,6 +34,13 @@ export interface ArticleList {
   page_size: number;
 }
 
+/** Formate une date ISO en format long FR ou court selon le besoin. */
+export function formatDate(isoDate: string, lang: "fr" | "en" = "fr", options?: Intl.DateTimeFormatOptions): string {
+  const locale = lang === "en" ? "en-US" : "fr-FR";
+  const defaultOptions: Intl.DateTimeFormatOptions = options ?? { day: "numeric", month: "short", year: "numeric" };
+  return new Date(isoDate).toLocaleDateString(locale, defaultOptions);
+}
+
 export interface Source {
   id: string;
   name: string;

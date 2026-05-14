@@ -22,31 +22,41 @@ export default function SynthesisPage() {
     () => fetch(`${API}/admin/syntheses`, { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json())
   );
 
+  // Partage le même cache SWR que AdminSettings pour éviter les doublons
   const { data: settingsData, mutate: mutateSettings } = useSWR(
-    token && role === "admin" ? "admin-settings-synth" : null,
+    token && role === "admin" ? "admin-settings" : null,
     () => fetch(`${API}/admin/settings`, { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json())
   );
 
   const [interest, setInterest] = useState("");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState(false);
 
   useEffect(() => {
     if (settingsData?.interest !== undefined) setInterest(settingsData.interest);
   }, [settingsData]);
 
   const saveInterest = async () => {
-    if (!token) return;
+    if (!token || !settingsData) return; // attendre que les settings soient chargés
     setSaving(true);
-    await fetch(`${API}/admin/settings`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ ...settingsData, interest }),
-    });
-    mutateSettings();
-    setSaving(false);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
+    setSaveError(false);
+    try {
+      const res = await fetch(`${API}/admin/settings`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ ...settingsData, interest }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      mutateSettings();
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } catch {
+      setSaveError(true);
+      setTimeout(() => setSaveError(false), 3000);
+    } finally {
+      setSaving(false);
+    }
   };
 
   if (status === "loading" || isLoading) {
@@ -88,17 +98,15 @@ export default function SynthesisPage() {
             />
             <button
               onClick={saveInterest}
-              disabled={saving}
+              disabled={saving || !settingsData}
+              title={!settingsData ? "Chargement des paramètres…" : undefined}
               className="px-4 py-2 rounded text-sm font-medium transition disabled:opacity-50"
               style={{ backgroundColor: "var(--text)", color: "var(--bg)" }}
             >
-              {saving ? "…" : "Sauvegarder"}
+              {saving ? "…" : !settingsData ? "Chargement…" : "Sauvegarder"}
             </button>
-            {saved && (
-              <span className="text-sm font-medium" style={{ color: "#22c55e" }}>
-                ✓ Sauvegardé
-              </span>
-            )}
+            {saved && <span className="text-sm font-medium" style={{ color: "#22c55e" }}>✓ Sauvegardé</span>}
+            {saveError && <span className="text-sm font-medium" style={{ color: "#ef4444" }}>✗ Erreur</span>}
           </div>
         </div>
       </div>

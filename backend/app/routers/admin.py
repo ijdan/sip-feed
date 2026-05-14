@@ -121,13 +121,16 @@ def _trigger_local(source_id: str | None = None) -> dict:
     if source_id:
         env["COLLECTOR_SOURCE_ID"] = source_id
 
+    import tempfile, pathlib
+    log_file = pathlib.Path(tempfile.gettempdir()) / "collector_local.log"
     subprocess.Popen(
         [python, "main.py"],
         cwd=str(COLLECTOR_DIR),
         env=env,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=open(log_file, "w"),
+        stderr=subprocess.STDOUT,
     )
+    logger.info(f"Collector lancé — logs : {log_file}")
     return {"status": "triggered_local", "source_id": source_id}
 
 

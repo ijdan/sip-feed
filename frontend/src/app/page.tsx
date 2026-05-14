@@ -155,7 +155,7 @@ export default function FeedPage() {
               opacity: dismissedList.length === 0 && !trashOpen ? 0.5 : 1,
             }}
           >
-            🗑️ {dismissedList.length > 0 && <span className="text-xs opacity-80">{dismissedList.length}</span>}
+            🗑️
           </button>
           <span>
             {isLoading ? "…" : hasFilters

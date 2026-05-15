@@ -82,6 +82,11 @@ export default function FeedPage() {
 
   const apiBase = `${process.env.NEXT_PUBLIC_API_URL}/articles/`;
   const pageSize = settings?.articles_per_page ?? 20;
+  const MAX_AUTO_PAGES = 10; // Borne défensive : max 10 pages auto-chargées par filtre
+
+  // Y : nombre de "clics + 1" sur "Afficher plus" — la cible visible est pageSize × clicks
+  const [clicks, setClicks] = useState(1);
+
   const { data, isLoading, size, setSize, isValidating } = useSWRInfinite(
     (index, prev) => {
       // Attendre que la session soit déterminée pour éviter un double fetch
@@ -97,7 +102,7 @@ export default function FeedPage() {
 
   const allItems: any[] = (data ?? []).flatMap((d: any) => d?.items ?? []);
   const totalAll = data?.[0]?.total ?? 0;
-  const hasMore = allItems.length < totalAll;
+  const targetVisible = pageSize * clicks;
   const loadingMore = isValidating && !isLoading;
 
   // Sources uniques avec compteurs (sur les articles chargés)
@@ -118,7 +123,7 @@ export default function FeedPage() {
     count: allItems.filter((a: any) => a.category === cat).length,
   }));
 
-  // Articles filtrés
+  // Articles filtrés (tous ceux qui matchent les filtres parmi les déjà chargés)
   const filteredItems = allItems.filter((a: any) => {
     if (excludedSources.has(a.source_name)) return false;
     if (selectedCategory !== null && a.category !== selectedCategory) return false;
@@ -134,6 +139,39 @@ export default function FeedPage() {
     return true;
   });
 
+  // Articles réellement affichés : on slice à pageSize × clicks
+  const visibleItems = filteredItems.slice(0, targetVisible);
+
+  // "Afficher plus" est utile s'il reste des filteredItems non-affichés
+  // OU si le backend a encore des pages à charger
+  const hasMoreBackend = allItems.length < totalAll;
+  const hasMoreVisible = filteredItems.length > visibleItems.length;
+  const hasMore = hasMoreVisible || hasMoreBackend;
+
+  // Auto-fetch : tant qu'on n'a pas atteint la cible et que le backend a plus
+  useEffect(() => {
+    if (isValidating || isLoading) return;
+    if (filteredItems.length >= targetVisible) return;
+    if (!hasMoreBackend) return;
+    if (size >= MAX_AUTO_PAGES) return;
+    setSize(size + 1);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filteredItems.length, targetVisible, isValidating, isLoading, hasMoreBackend, size]);
+
+  // Reset clicks à 1 quand un filtre change (la US demande Y=1 sur changement de filtre).
+  // dismissedSet est volontairement exclu : dismisser un article est une action item-level,
+  // pas un filtre global → ne doit pas réinitialiser la pagination.
+  useEffect(() => {
+    setClicks(1);
+  }, [excludedSources, selectedCategory, filterFavorites, filterReading, hideRead, searchTerms]);
+
+  // Reset clicks ET pages SWR quand pageSize change (la US demande Y=1 sur changement de X)
+  useEffect(() => {
+    setClicks(1);
+    setSize(1);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pageSize]);
+
   // Suggestions contextuelles : mots-clés des articles déjà filtrés
   // → se réduisent au fur et à mesure des mots-clés sélectionnés
   const allKeywords: string[] = Array.from(
@@ -141,9 +179,6 @@ export default function FeedPage() {
       lang === "en" ? (a.keywords_en ?? []) : (a.keywords_fr ?? [])
     ))
   ).sort();
-
-  const filteredTotal = filteredItems.length;
-  const hasFilters = excludedSources.size > 0 || selectedCategory !== null || filterFavorites || filterReading || hideRead || searchTerms.length > 0;
 
   return (
     <div className="space-y-4">
@@ -167,9 +202,7 @@ export default function FeedPage() {
             🗑️
           </button>
           <span>
-            {isLoading ? "…" : hasFilters
-              ? `${filteredTotal} sur ${totalAll} article${totalAll > 1 ? "s" : ""}`
-              : `${totalAll} article${totalAll > 1 ? "s" : ""}`}
+            {isLoading ? "…" : `${visibleItems.length} affiché${visibleItems.length > 1 ? "s" : ""} sur ${totalAll}`}
           </span>
         </div>
 
@@ -313,13 +346,15 @@ export default function FeedPage() {
         /* Vue feed normale */
         <>
           {isLoading && <p style={{ color: "var(--text-muted)" }}>Chargement…</p>}
-          {!isLoading && filteredItems.length === 0 && (
+          {!isLoading && visibleItems.length === 0 && !loadingMore && (
             <p className="text-sm" style={{ color: "var(--text-muted)" }}>
-              Aucun article — ajuste les filtres ou réaffiche des sources.
+              {hasMoreBackend && size >= MAX_AUTO_PAGES
+                ? "Pas plus de résultats correspondant à tes critères dans les pages parcourues."
+                : "Aucun article — ajuste les filtres ou réaffiche des sources."}
             </p>
           )}
           <div className={`grid gap-4 ${COLUMN_CLASSES[columns]}`}>
-            {filteredItems.map((article: any) => (
+            {visibleItems.map((article: any) => (
               <NewsCard
                 key={article.id}
                 article={article}
@@ -334,21 +369,23 @@ export default function FeedPage() {
               />
             ))}
           </div>
-          {hasMore && (
+          {loadingMore && (
+            <p className="text-center text-sm pt-4" style={{ color: "var(--text-muted)" }}>
+              Chargement…
+            </p>
+          )}
+          {hasMore && !loadingMore && (
             <div className="flex justify-center pt-4">
               <button
-                onClick={() => setSize(size + 1)}
-                disabled={loadingMore}
-                className="px-4 py-2 rounded-md border text-sm transition disabled:opacity-50"
+                onClick={() => setClicks(c => c + 1)}
+                className="px-4 py-2 rounded-md border text-sm transition"
                 style={{
                   borderColor: "var(--border)",
                   backgroundColor: "var(--surface)",
                   color: "var(--text)",
                 }}
               >
-                {loadingMore
-                  ? "Chargement…"
-                  : `Charger plus (${allItems.length} / ${totalAll})`}
+                Afficher plus
               </button>
             </div>
           )}

@@ -54,11 +54,11 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Setup Java 17 (requis par Firestore emulator)
+      - name: Setup Java 21 (requis par firebase-tools récent)
         uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
-          java-version: '17'
+          java-version: '21'
 
       - name: Installer Firebase CLI
         run: npm install -g firebase-tools@latest

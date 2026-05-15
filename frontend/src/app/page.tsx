@@ -327,7 +327,7 @@ export default function FeedPage() {
           {dismissedList.length === 0 && (
             <p className="text-sm" style={{ color: "var(--text-muted)" }}>La corbeille est vide.</p>
           )}
-          <div className="space-y-3">
+          <div className={`grid gap-4 ${COLUMN_CLASSES[columns]}`}>
             {[...dismissedList]
               .map(id => allItems.find((a: any) => a.id === id))
               .filter(Boolean)

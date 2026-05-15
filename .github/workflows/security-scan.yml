@@ -1,0 +1,36 @@
+name: Security Scan — Backend
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/app/**'
+      - 'agents/security_scanner.py'
+      - '.github/workflows/security-scan.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'backend/app/**'
+      - 'agents/security_scanner.py'
+      - '.github/workflows/security-scan.yml'
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Lancer le scanner de sécurité
+        run: python3 agents/security_scanner.py
+
+      - name: Uploader le rapport JSON
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-report
+          path: security-report.json
+          if-no-files-found: warn

@@ -150,17 +150,31 @@ class SecurityScanner:
         # Ignorer les strings/commentaires
         if line.strip().startswith('#'):
             return True
-        
+
         # Ignorer les imports
         if 'import' in line:
             return True
-            
-        # Certains patterns à exclure selon la catégorie
+
+        # AUTH : si le fichier utilise Depends(), considérer les routes comme protégées
+        # (FastAPI : l'auth est typiquement injectée via Depends dans la signature)
         if category == VulnCategory.AUTH:
-            # Les endpoints de healthcheck ne besoin pas d'auth
             if 'health' in line.lower() or 'ping' in line.lower():
                 return True
-        
+            if 'Depends(' in context:
+                return True
+
+        # INJ : une f-string n'est pas une injection SQL si elle n'a aucun keyword SQL
+        # et n'est pas passée à .execute/.query/.raw. Les f-strings type "Bearer {token}"
+        # ou des URLs constantes ne doivent pas être marquées CRITIQUE.
+        if category == VulnCategory.INJ:
+            sql_keywords = ('SELECT', 'INSERT', 'UPDATE', 'DELETE', 'FROM ', 'WHERE', 'JOIN')
+            line_upper = line.upper()
+            has_sql = any(kw in line_upper for kw in sql_keywords)
+            has_exec_call = any(call in line for call in ('.execute(', '.query(', '.raw('))
+            has_dangerous = any(call in line for call in ('eval(', 'exec(', 'compile('))
+            if not (has_sql or has_exec_call or has_dangerous):
+                return True
+
         return False
 
     def _determine_severity(self, category: VulnCategory, description: str) -> Severity:
@@ -175,26 +189,11 @@ class SecurityScanner:
             return Severity.BASSE
 
     def _analyze_ast(self, tree: ast.AST, filepath: str, lines: List[str]) -> None:
-        """Analyse l'AST pour des patterns spécifiques."""
-        for node in ast.walk(tree):
-            # Détection de fonctions sans docstring
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    if not ast.get_docstring(node):
-                        # Les routes FastAPI sans docstring
-                        for decorator in node.decorator_list:
-                            if isinstance(decorator, ast.Call):
-                                if isinstance(decorator.func, ast.Attribute):
-                                    if decorator.func.attr in ['get', 'post', 'put', 'delete']:
-                                        self.vulnerabilities.append(Vulnerability(
-                                            file=filepath,
-                                            line=node.lineno,
-                                            category=VulnCategory.ERR.value,
-                                            severity=Severity.BASSE.value,
-                                            title="Route sans documentation",
-                                            description="La route n'a pas de docstring (manque de documentation).",
-                                            code_snippet=lines[node.lineno - 1].strip()[:100] if node.lineno <= len(lines) else ""
-                                        ))
+        """Analyse l'AST pour des patterns spécifiques. La détection 'route sans
+        docstring' a été retirée — c'est du linting, pas une vulnérabilité."""
+        # Placeholder pour de futures analyses AST plus utiles
+        # (ex: détection d'usage de subprocess avec shell=True, etc.)
+        _ = tree, filepath, lines
 
     def _get_full_description(self, category: VulnCategory, short_desc: str) -> str:
         """Génère une description complète avec recommandation."""

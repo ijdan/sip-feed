@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
+import httpx
 import jwt
 from datetime import datetime, timedelta, timezone
 
@@ -71,14 +72,53 @@ def _upsert_user(email: str, name: str, avatar: str, provider: str) -> tuple[str
     return internal_id, role
 
 
-@router.post("/session")
-async def session_login(payload: dict):
-    """Endpoint générique : reçoit email/name/avatar/provider depuis NextAuth."""
-    email = payload.get("email", "").strip().lower()
+@router.post("/github")
+async def github_login(payload: dict):
+    """Reçoit un token OAuth GitHub et vérifie l'identité côté backend."""
+    provider = payload.get("provider")
+    access_token = payload.get("access_token")
+    if provider != "github" or not access_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Provider non supporté ou token manquant",
+        )
+
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "Authorization": f"Bearer {access_token}",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            user_resp = await client.get("https://api.github.com/user", headers=headers)
+            emails_resp = await client.get("https://api.github.com/user/emails", headers=headers)
+    except httpx.RequestError:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="GitHub indisponible")
+
+    if user_resp.status_code != 200 or emails_resp.status_code != 200:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token GitHub invalide")
+
+    profile = user_resp.json()
+    emails = emails_resp.json()
+    primary = next(
+        (
+            item
+            for item in emails
+            if item.get("primary") and item.get("verified") and item.get("email")
+        ),
+        None,
+    )
+    if not primary:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Email GitHub vérifié requis")
+
+    email = primary["email"].strip().lower()
     if not email:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email requis")
     internal_id, role = _upsert_user(
-        email, payload.get("name", ""), payload.get("avatar", ""), payload.get("provider", "unknown")
+        email,
+        profile.get("name") or profile.get("login") or "",
+        profile.get("avatar_url") or "",
+        "github",
     )
     return {"access_token": create_jwt(internal_id, email, role), "role": role}
 

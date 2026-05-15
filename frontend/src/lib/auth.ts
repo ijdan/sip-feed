@@ -11,39 +11,53 @@ export const authOptions: NextAuthOptions = {
     GithubProvider({
       clientId: process.env.GITHUB_CLIENT_ID!,
       clientSecret: process.env.GITHUB_CLIENT_SECRET!,
+      authorization: { params: { scope: "read:user user:email" } },
     }),
   ],
   callbacks: {
-    async jwt({ token, account, profile }) {
+    async jwt({ token, account }) {
       if (account) {
-        let res: Response | null = null;
+        let res: Response;
 
-        if (account.provider === "google" && account.id_token) {
-          // Vérification côté backend avec l'id_token Google
-          res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/auth/google`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ credential: account.id_token }),
-          });
-        } else {
-          // GitHub et futurs providers : endpoint générique
-          const p = profile as any;
-          res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/auth/session`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              email: token.email,
-              name: p?.name || p?.login || token.name || "",
-              avatar: p?.avatar_url || token.picture || "",
-              provider: account.provider,
-            }),
-          });
-        }
+        try {
+          if (account.provider === "google" && account.id_token) {
+            // Vérification côté backend avec l'id_token Google
+            res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/auth/google`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ credential: account.id_token }),
+            });
+          } else if (account.provider === "github" && account.access_token) {
+            // Vérification côté backend avec l'access token opaque GitHub.
+            res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/auth/github`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                provider: account.provider,
+                access_token: account.access_token,
+              }),
+            });
+          } else {
+            token.authError = "unsupported_provider";
+            return token;
+          }
 
-        if (res?.ok) {
+          if (!res.ok) {
+            token.authError = `backend_${res.status}`;
+            return token;
+          }
+
           const data = await res.json();
+          if (!data.access_token || !data.role) {
+            token.authError = "invalid_backend_response";
+            return token;
+          }
+
           token.accessToken = data.access_token;
           token.role = data.role;
+          delete token.authError;
+        } catch {
+          token.authError = "backend_unreachable";
         }
       }
       return token;

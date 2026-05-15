@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect } from "react";
-import useSWR from "swr";
+import useSWRInfinite from "swr/infinite";
 import { useSession } from "next-auth/react";
 import { usePreferences } from "@/lib/usePreferences";
 import { useSettings } from "@/lib/useSettings";
@@ -11,7 +11,7 @@ import SearchBar from "@/components/SearchBar";
 import TrashCard from "@/components/TrashCard";
 import { CATEGORIES, categoryLabel } from "@/lib/categories";
 
-const fetcher = (url: string) => fetch(url).then((r) => r.json());
+const PAGE_SIZE = 50;
 
 const COLUMN_CLASSES: Record<number, string> = {
   1: "grid-cols-1",
@@ -82,16 +82,27 @@ export default function FeedPage() {
 
 
 
-  const articlesUrl = `${process.env.NEXT_PUBLIC_API_URL}/articles/?page_size=500`;
-  const { data, isLoading } = useSWR(
-    // Attendre que la session soit déterminée pour éviter un double fetch
-    sessionStatus === "loading" ? null : [articlesUrl, token ?? ""],
-    ([url, t]) => fetch(url, t ? { headers: { Authorization: `Bearer ${t}` } } : {}).then(r => r.json()),
-    { revalidateOnFocus: false }  // évite un refetch au changement de focus
+  const apiBase = `${process.env.NEXT_PUBLIC_API_URL}/articles/`;
+  const { data, isLoading, size, setSize, isValidating } = useSWRInfinite(
+    (index, prev) => {
+      // Attendre que la session soit déterminée pour éviter un double fetch
+      if (sessionStatus === "loading") return null;
+      // Stoppe la pagination quand la dernière page est vide
+      if (prev && prev.items && prev.items.length === 0) return null;
+      return [`${apiBase}?page=${index + 1}&page_size=${PAGE_SIZE}`, token ?? ""];
+    },
+    ([url, t]: [string, string]) =>
+      fetch(url, t ? { headers: { Authorization: `Bearer ${t}` } } : {}).then(r => r.json()),
+    { revalidateOnFocus: false }
   );
 
-  // Sources uniques avec compteurs
-  const sourceCountsAll: Record<string, number> = (data?.items ?? []).reduce(
+  const allItems: any[] = (data ?? []).flatMap((d: any) => d?.items ?? []);
+  const totalAll = data?.[0]?.total ?? 0;
+  const hasMore = allItems.length < totalAll;
+  const loadingMore = isValidating && !isLoading;
+
+  // Sources uniques avec compteurs (sur les articles chargés)
+  const sourceCountsAll: Record<string, number> = allItems.reduce(
     (acc: Record<string, number>, a: any) => {
       acc[a.source_name] = (acc[a.source_name] ?? 0) + 1;
       return acc;
@@ -101,15 +112,15 @@ export default function FeedPage() {
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([key, count]) => ({ key, label: key, count }));
 
-  // Catégories avec compteurs
+  // Catégories avec compteurs (sur les articles chargés)
   const categoryItems: FilterItem[] = CATEGORIES.map((cat) => ({
     key: cat,
     label: categoryLabel(cat, lang),
-    count: (data?.items ?? []).filter((a: any) => a.category === cat).length,
+    count: allItems.filter((a: any) => a.category === cat).length,
   }));
 
   // Articles filtrés
-  const filteredItems = (data?.items ?? []).filter((a: any) => {
+  const filteredItems = allItems.filter((a: any) => {
     if (excludedSources.has(a.source_name)) return false;
     if (selectedCategory !== null && a.category !== selectedCategory) return false;
     if (dismissedSet.has(a.id)) return false;
@@ -133,7 +144,6 @@ export default function FeedPage() {
   ).sort();
 
   const filteredTotal = filteredItems.length;
-  const totalAll = data?.total ?? 0;
   const hasFilters = excludedSources.size > 0 || selectedCategory !== null || filterFavorites || filterReading || hideRead || searchTerms.length > 0;
 
   return (
@@ -287,7 +297,7 @@ export default function FeedPage() {
           )}
           <div className="space-y-3">
             {[...dismissedList]
-              .map(id => (data?.items ?? []).find((a: any) => a.id === id))
+              .map(id => allItems.find((a: any) => a.id === id))
               .filter(Boolean)
               .sort((a: any, b: any) => b.published_at.localeCompare(a.published_at))
               .map((article: any) => (
@@ -325,6 +335,24 @@ export default function FeedPage() {
               />
             ))}
           </div>
+          {hasMore && (
+            <div className="flex justify-center pt-4">
+              <button
+                onClick={() => setSize(size + 1)}
+                disabled={loadingMore}
+                className="px-4 py-2 rounded-md border text-sm transition disabled:opacity-50"
+                style={{
+                  borderColor: "var(--border)",
+                  backgroundColor: "var(--surface)",
+                  color: "var(--text)",
+                }}
+              >
+                {loadingMore
+                  ? "Chargement…"
+                  : `Charger plus (${allItems.length} / ${totalAll})`}
+              </button>
+            </div>
+          )}
         </>
       )}
     </div>

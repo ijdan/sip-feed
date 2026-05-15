@@ -72,51 +72,54 @@ jobs:
       - name: Installer Chromium pour Playwright
         run: cd frontend && npx playwright install chromium --with-deps
 
-      - name: Démarrer l'émulateur Firestore
+      - name: Démarrer services et lancer les tests E2E
         run: |
-          firebase emulators:start --only firestore --project tech-news-aggregator-001 &
-          # Attendre que le port 8080 réponde
+          set -e
+
+          echo "::group::Émulateur Firestore"
+          firebase emulators:start --only firestore --project tech-news-aggregator-001 > /tmp/emulator.log 2>&1 &
           for i in $(seq 1 60); do
             if curl -s http://localhost:8080 >/dev/null 2>&1; then
-              echo "Émulateur Firestore prêt"
+              echo "Émulateur prêt après ${i}s"
               break
             fi
             sleep 1
           done
+          curl -s http://localhost:8080 >/dev/null || { echo "ÉMULATEUR KO"; tail -50 /tmp/emulator.log; exit 1; }
+          echo "::endgroup::"
 
-      - name: Seeder 30 articles factices
-        run: python tests/seed_articles_for_e2e.py
+          echo "::group::Seed 30 articles factices"
+          python tests/seed_articles_for_e2e.py
+          echo "::endgroup::"
 
-      - name: Démarrer le backend FastAPI
-        working-directory: backend
-        run: |
-          uvicorn app.main:app --host 0.0.0.0 --port 8000 > /tmp/backend.log 2>&1 &
+          echo "::group::Backend FastAPI"
+          ( cd backend && uvicorn app.main:app --host 0.0.0.0 --port 8000 > /tmp/backend.log 2>&1 & )
           for i in $(seq 1 60); do
             if curl -s http://localhost:8000/health >/dev/null 2>&1; then
-              echo "Backend prêt"
+              echo "Backend prêt après ${i}s"
               break
             fi
             sleep 1
           done
-          curl -s http://localhost:8000/health || (echo "Backend KO"; cat /tmp/backend.log; exit 1)
+          curl -sS http://localhost:8000/health || { echo "BACKEND KO"; tail -50 /tmp/backend.log; exit 1; }
+          echo "::endgroup::"
 
-      - name: Démarrer le frontend Next.js (dev)
-        working-directory: frontend
-        run: |
-          npm run dev > /tmp/frontend.log 2>&1 &
-          for i in $(seq 1 120); do
+          echo "::group::Frontend Next.js (dev)"
+          ( cd frontend && npm run dev > /tmp/frontend.log 2>&1 & )
+          for i in $(seq 1 180); do
             if curl -s http://localhost:3000 >/dev/null 2>&1; then
-              echo "Frontend prêt"
+              echo "Frontend prêt après ${i}s"
               break
             fi
             sleep 1
           done
-          curl -sS http://localhost:3000 -o /dev/null -w "frontend HTTP %{http_code}\n" \
-            || (echo "Frontend KO"; tail -40 /tmp/frontend.log; exit 1)
+          curl -sS -o /dev/null -w "Frontend HTTP %{http_code}\n" http://localhost:3000 \
+            || { echo "FRONTEND KO"; tail -50 /tmp/frontend.log; exit 1; }
+          echo "::endgroup::"
 
-      - name: Lancer les tests E2E Playwright
-        working-directory: frontend
-        run: npm run e2e
+          echo "::group::Playwright"
+          cd frontend && npm run e2e
+          echo "::endgroup::"
 
       - name: Upload du rapport Playwright (en cas d'échec)
         if: failure()

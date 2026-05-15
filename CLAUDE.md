@@ -28,7 +28,7 @@ Projet GCP : `tech-news-aggregator-001` / région `europe-west1`. Voir `docs/Sch
 ### Tests
 
 ```bash
-./tests/run-tests.sh                                 # suite complète (API + scraper + collector) avec rapport
+./tests/run-tests.sh                                 # suite complète backend (API + scraper + collector) avec rapport
 cd tests && pytest test_collector.py -v              # un seul fichier
 cd tests && pytest test_collector.py::test_save_raw_articles_unique_ids -v   # un seul test
 ./install-hooks.sh                                   # installe le hook pre-push qui bloque le push si les tests échouent
@@ -44,7 +44,17 @@ cd frontend && npm run build     # build prod (utilisé par le Dockerfile multi-
 cd frontend && node_modules/.bin/tsc --noEmit   # type-check (utilisé par la CI)
 ```
 
-Aucun linter, aucun framework de test JS configuré — la CI ne fait que `tsc --noEmit`.
+Aucun linter, ni framework de test unitaire JS configuré — la CI ne fait que `tsc --noEmit`.
+
+### Tests E2E Playwright
+
+```bash
+cd frontend && npm run e2e:install   # 1ère fois seulement : télécharge Chromium (~150 MB)
+cd frontend && npm run e2e           # lance les 5 scénarios E2E en headless
+cd frontend && npm run e2e:ui        # mode UI interactif (debug)
+```
+
+Pré-requis : émulateur Firestore + backend + frontend démarrés (cf. `start-emulator.sh` + `start-local.sh`). Les tests sont dans `frontend/e2e/`, nommés `US-XXX-NNN — description` pour traçabilité avec les fichiers `Features/*.md`. Pas encore intégré à la CI (chantier à part : prévoir runner GitHub avec services démarrés ou émulateur en CI).
 
 ### Déploiement
 

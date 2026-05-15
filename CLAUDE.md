@@ -48,12 +48,7 @@ Aucun linter, aucun framework de test JS configuré — la CI ne fait que `tsc -
 
 ### Déploiement
 
-```bash
-./deploy.sh                          # build + deploy backend, frontend, collector
-./deploy.sh backend                  # un service à la fois
-```
-
-La CI (`.github/workflows/ci-cd.yml`) déploie automatiquement sur push vers `main` avec `dorny/paths-filter` : seul ce qui a changé est rebuild. Le déploiement collector met à jour un **Cloud Run Job** (pas un service) via `gcloud run jobs update`.
+**Le déploiement passe exclusivement par la CI** (`.github/workflows/ci-cd.yml`) — `git push` vers `main` rebuild + déploie automatiquement avec `dorny/paths-filter` : seul ce qui a changé est rebuild. Il n'y a pas de script de déploiement manuel : le workflow GitHub Actions est la source de vérité unique. Le déploiement collector met à jour un **Cloud Run Job** (pas un service) via `gcloud run jobs update`.
 
 ## Architecture — points qui demandent de lire plusieurs fichiers
 
@@ -96,5 +91,5 @@ Les `articles` sont **publics en lecture** (feed anonyme), mais toutes les écri
 - Pas de linter Python configuré — pas de `ruff`/`flake8`/`black` à invoquer.
 - Catégories d'articles canoniques : `["IA", "DevOps", "Cloud", "Sécurité", "Dev", "IT", "Autre"]`. Définies en doublon dans `backend/app/routers/articles.py`, `backend/app/models/article.py`, et `collector/processors/gemini_processor.py` — modifier les trois ensemble.
 - `DEFAULT_MODEL_PRIORITY` (liste de modèles Gemini) est dupliquée dans `collector/main.py`, `collector/processors/gemini_processor.py`, et `backend/app/routers/admin.py`. Quand un nouveau modèle est ajouté en tête de cette liste, le backend nettoie automatiquement les modèles inconnus stockés en Firestore et insère les nouveaux.
-- Secrets en prod via Secret Manager (montés en env vars par `--set-secrets` dans `deploy.sh`). En local : `backend/.env` et `collector/.env`, jamais commités (`.gitignore` les bloque).
+- Secrets en prod via Secret Manager (montés en env vars par `--set-secrets` dans `.github/workflows/ci-cd.yml`). En local : `backend/.env` et `collector/.env`, jamais commités (`.gitignore` les bloque).
 - `gmail_token.json` est généré une seule fois via `collector/auth_gmail.py` et monté en env var `GMAIL_TOKEN` en prod.

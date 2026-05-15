@@ -134,6 +134,7 @@ export default function AdminSettings({ token }: { token: string }) {
             ))}
           </select>
         </div>
+
       </div>
 
       <div className="border-t pt-4 space-y-3">

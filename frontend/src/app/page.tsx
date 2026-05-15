@@ -11,8 +11,6 @@ import SearchBar from "@/components/SearchBar";
 import TrashCard from "@/components/TrashCard";
 import { CATEGORIES, categoryLabel } from "@/lib/categories";
 
-const PAGE_SIZE = 50;
-
 const COLUMN_CLASSES: Record<number, string> = {
   1: "grid-cols-1",
   2: "grid-cols-1 sm:grid-cols-2",
@@ -83,13 +81,14 @@ export default function FeedPage() {
 
 
   const apiBase = `${process.env.NEXT_PUBLIC_API_URL}/articles/`;
+  const pageSize = settings?.articles_per_page ?? 20;
   const { data, isLoading, size, setSize, isValidating } = useSWRInfinite(
     (index, prev) => {
       // Attendre que la session soit déterminée pour éviter un double fetch
       if (sessionStatus === "loading") return null;
       // Stoppe la pagination quand la dernière page est vide
       if (prev && prev.items && prev.items.length === 0) return null;
-      return [`${apiBase}?page=${index + 1}&page_size=${PAGE_SIZE}`, token ?? ""];
+      return [`${apiBase}?page=${index + 1}&page_size=${pageSize}`, token ?? ""];
     },
     ([url, t]: [string, string]) =>
       fetch(url, t ? { headers: { Authorization: `Bearer ${t}` } } : {}).then(r => r.json()),

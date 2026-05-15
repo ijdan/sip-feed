@@ -115,6 +115,19 @@ export default function SettingsPage() {
             ))}
           </div>
         </Row>
+        <Row label="Articles par page">
+          <div className="flex border rounded-md overflow-hidden" style={{ borderColor: "var(--border)" }}>
+            {([10, 20, 50, 100] as const).map(n => (
+              <button key={n} onClick={() => { update({ articles_per_page: n }); flash(); }}
+                className="px-3 py-1.5 text-sm transition"
+                style={settings.articles_per_page === n
+                  ? { backgroundColor: "var(--text)", color: "var(--bg)" }
+                  : { backgroundColor: "var(--surface)", color: "var(--text-muted)" }}>
+                {n}
+              </button>
+            ))}
+          </div>
+        </Row>
       </Section>
 
       {/* Catégories par défaut */}

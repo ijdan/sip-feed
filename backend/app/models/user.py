@@ -34,3 +34,4 @@ class UserSettings(BaseModel):
     excluded_sources: list[str] = []
     hide_read: bool = False
     default_lang: str = "fr"
+    articles_per_page: int = 20

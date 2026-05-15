@@ -81,8 +81,16 @@ def _scrape_generic(soup: BeautifulSoup, base_url: str, source: dict) -> list[di
 
 
 def scrape_source(source: dict) -> list[dict]:
+    url = source.get("url", "")
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        raise ValueError(
+            f"URL invalide pour la source {source.get('name', '?')!r} : "
+            f"scheme={parsed.scheme or 'absent'}, host={parsed.netloc or 'absent'}"
+        )
+
     response = httpx.get(
-        source["url"],
+        url,
         timeout=15,
         follow_redirects=True,
         headers={"User-Agent": "Mozilla/5.0 (compatible; TechNewsBot/1.0)"},

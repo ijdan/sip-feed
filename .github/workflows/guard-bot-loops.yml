@@ -1,0 +1,43 @@
+name: 0. Garde-fou anti-boucle bot
+
+# Vérifie qu'aucune branche n'a une suite de commits bot consécutifs trop longue
+# (signe potentiel d'une boucle de génération infinie).
+#
+# Se déclenche sur TOUT push, vérifie les 5 derniers commits :
+# - si TOUS les 5 sont du bot claude-bot → fail le job, ce qui :
+#   * échoue le check sur la branche
+#   * via branch protection, bloque le merge éventuel
+#   * alerte l'auteur (humain) qu'il y a un souci
+
+on:
+  push:
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 10  # juste assez pour regarder les 5-6 derniers commits
+
+      - name: Compter les commits bot consécutifs
+        run: |
+          # Les 5 derniers committers (email)
+          EMAILS=$(git log -5 --pretty=format:"%ae")
+          echo "Derniers committers :"
+          echo "$EMAILS"
+          echo
+
+          BOT_COUNT=$(echo "$EMAILS" | grep -c "claude-bot" || true)
+
+          if [ "$BOT_COUNT" -ge 5 ]; then
+            echo "::error::5 commits consécutifs du bot détectés — possible boucle infinie."
+            echo "Action requise : interrompre les workflows en cours et investiguer."
+            exit 1
+          fi
+
+          echo "OK : $BOT_COUNT commits bot sur les 5 derniers (seuil < 5)."

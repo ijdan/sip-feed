@@ -27,7 +27,7 @@ La nouveauté ici : périmètre élargi à **tous les services**, cadence indép
 **afin de** disposer d'un rapport frais au matin sans intervention manuelle.
 
 **Description fonctionnelle**
-Un nouveau **Cloud Run Job** `log-analyzer` (script Python dans `log-analyzer/main.py`) est déclenché par **Cloud Scheduler** (cron `0 2 * * *`, timezone `Europe/Paris`). Il est indépendant du collector. Son Dockerfile est distinct ; le CI/CD le déploie comme un Cloud Run Job séparé via `gcloud run jobs update log-analyzer` (chemin `log-analyzer/**` dans `dorny/paths-filter`).
+Un nouveau **Cloud Run Job** `log-analyzer` (script Python dans `log-analyzer/main.py`) est déclenché par **Cloud Scheduler** (cron `0 5 * * *`, timezone `Europe/Paris`). Il est indépendant du collector. Son Dockerfile est distinct ; le CI/CD le déploie comme un Cloud Run Job séparé via `gcloud run jobs update log-analyzer` (chemin `log-analyzer/**` dans `dorny/paths-filter`).
 
 **Règles métier**
 - Le job tourne même si le collector n'a pas tourné dans la journée.
@@ -36,7 +36,7 @@ Un nouveau **Cloud Run Job** `log-analyzer` (script Python dans `log-analyzer/ma
 
 **Critères d'acceptation**
 1. Le job `log-analyzer` apparaît dans Cloud Run > Jobs avec un historique d'exécutions.
-2. Cloud Scheduler montre un run quotidien réussi à 02h00.
+2. Cloud Scheduler montre un run quotidien réussi à 05h00.
 3. Si le job est relancé manuellement le même jour et qu'un rapport existe déjà, il s'arrête avec log "Rapport du jour déjà généré — skip."
 4. Un échec du job ne produit pas d'entrée Firestore partielle (atomicité).
 
@@ -140,7 +140,7 @@ Le rapport est écrit dans la collection `log_analyses` avec pour clé de docume
 ```json
 {
   "date": "2026-05-16",
-  "generated_at": "2026-05-17T02:03:47Z",
+  "generated_at": "2026-05-17T05:03:47Z",
   "period_start": "2026-05-16T00:00:00Z",
   "period_end": "2026-05-17T00:00:00Z",
   "logs_count": 342,
@@ -190,7 +190,7 @@ Deux nouvelles routes dans `backend/app/routers/admin.py` (require_admin) :
 ```json
 {
   "date": "2026-05-16",
-  "generated_at": "2026-05-17T02:03:47Z",
+  "generated_at": "2026-05-17T05:03:47Z",
   "logs_count": 342,
   "resume": "...",
   "items": [ { "point_notable": "...", "prompt_correction": "...", "date": "...", "priorite": "HAUTE" } ]

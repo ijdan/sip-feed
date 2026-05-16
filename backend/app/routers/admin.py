@@ -285,9 +285,11 @@ def get_latest_report(_: dict = Depends(require_admin)):
 
 @router.get("/log-analysis")
 def get_log_analysis(_: dict = Depends(require_admin)):
-    from datetime import date as date_type
+    from datetime import date as date_type, timedelta
     db = get_db()
-    doc = db.collection("log_analyses").document(date_type.today().isoformat()).get()
+    # Le job tourne la nuit et couvre la veille → la clé = hier, pas aujourd'hui
+    yesterday = (date_type.today() - timedelta(days=1)).isoformat()
+    doc = db.collection("log_analyses").document(yesterday).get()
     if not doc.exists:
         raise HTTPException(status_code=404, detail="Rapport non disponible pour cette date.")
     return doc.to_dict()

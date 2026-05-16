@@ -46,7 +46,9 @@ export default function LogAnalysisPage() {
   const role = ((session as unknown) as import("@/lib/types").AppSession)?.role;
 
   const today = new Date().toISOString().slice(0, 10);
-  const [selectedDate, setSelectedDate] = useState(today);
+  // Le rapport du jour couvre la veille (le job tourne la nuit et écrit log_analyses/{hier})
+  const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+  const [selectedDate, setSelectedDate] = useState(yesterday);
 
   useEffect(() => {
     if (status === "unauthenticated") router.replace("/login");

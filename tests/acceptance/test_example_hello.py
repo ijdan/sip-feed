@@ -1,6 +1,8 @@
 from pytest_bdd import scenarios, given, when, then, parsers
 import pytest
 
+from backend.app.features.example_hello import saluer
+
 scenarios("../../features/example-hello.feature")
 
 
@@ -11,14 +13,15 @@ def contexte():
 
 @given("the system is running")
 def le_systeme_est_en_marche(contexte):
-    raise NotImplementedError("Implémentation applicative à venir")
+    contexte["pret"] = True
 
 
 @when("I request a greeting")
 def je_demande_un_salut(contexte):
-    raise NotImplementedError("Implémentation applicative à venir")
+    assert contexte.get("pret") is True
+    contexte["reponse"] = saluer()
 
 
 @then(parsers.parse('I receive "{message}"'))
 def je_recois_le_message(contexte, message):
-    raise NotImplementedError("Implémentation applicative à venir")
+    assert contexte["reponse"] == message

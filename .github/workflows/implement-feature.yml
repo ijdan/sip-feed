@@ -129,6 +129,8 @@ jobs:
           # au niveau du job pour éviter les boucles. Mettre [skip ci] dans le
           # message provoquerait le skip de ci-cd.yml lors du squash merge.
           git commit -m "implémentation de ${{ steps.features.outputs.slug }} (${STATUS_LABEL})"
+          # Rebase sur l'éventuelle avance du remote (ex : push manuel pendant le run)
+          git pull --rebase origin "${{ steps.branch.outputs.branch }}" || true
           git push origin "HEAD:${{ steps.branch.outputs.branch }}"
 
       - name: Ouvrir la PR draft vers main

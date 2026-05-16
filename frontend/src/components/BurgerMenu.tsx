@@ -32,11 +32,6 @@ export default function BurgerMenu() {
           className="absolute right-0 top-full mt-2 w-56 rounded-lg border shadow-lg z-50 py-1"
           style={{ backgroundColor: "var(--surface)", borderColor: "var(--border)" }}
         >
-          <Link href="/" onClick={() => setOpen(false)}
-            className="flex items-center gap-2 px-4 py-2.5 text-sm transition hover:opacity-70"
-            style={{ color: "var(--text)" }}>
-            📰 Feed
-          </Link>
           {((session as unknown) as import("@/lib/types").AppSession)?.role === "admin" && (
             <Link href="/admin/synthesis" onClick={() => setOpen(false)}
               className="flex items-center gap-2 px-4 py-2.5 text-sm transition hover:opacity-70"

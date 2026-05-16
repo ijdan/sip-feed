@@ -1,5 +1,5 @@
 # language: fr
-# US-DLA-001 à US-DLA-006 — v2 (budget 30 turns)
+# US-DLA-001 à US-DLA-006 — v3 (budget 30 turns, relance)
 Fonctionnalité: Analyse quotidienne des logs GCP par LLM
 
   Chaque nuit à 05h00, le job log-analyzer récupère les logs WARNING+

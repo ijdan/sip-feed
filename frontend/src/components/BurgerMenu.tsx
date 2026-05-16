@@ -33,6 +33,13 @@ export default function BurgerMenu() {
           style={{ backgroundColor: "var(--surface)", borderColor: "var(--border)" }}
         >
           {((session as unknown) as import("@/lib/types").AppSession)?.role === "admin" && (
+            <Link href="/admin/log-analysis" onClick={() => setOpen(false)}
+              className="flex items-center gap-2 px-4 py-2.5 text-sm transition hover:opacity-70"
+              style={{ color: "var(--text)" }}>
+              🔍 Analyse logs
+            </Link>
+          )}
+          {((session as unknown) as import("@/lib/types").AppSession)?.role === "admin" && (
             <Link href="/admin/synthesis" onClick={() => setOpen(false)}
               className="flex items-center gap-2 px-4 py-2.5 text-sm transition hover:opacity-70"
               style={{ color: "var(--text)" }}>

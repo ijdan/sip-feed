@@ -225,9 +225,6 @@ def run_log_analysis(
         logger.error("Impossible de récupérer les logs Cloud Logging : %s", e)
         entries, truncated = [], False
 
-    from collector_default_model_priority import DEFAULT_MODEL_PRIORITY as _DEFAULT  # type: ignore  # noqa
-    # Note : import circulaire évité — on accepte model_priority en argument.
-
     model_priority = model_priority or []
     if not entries:
         rapport = {"resume": MESSAGE_AUCUNE_ANOMALIE, "items": []}

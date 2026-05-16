@@ -78,8 +78,7 @@ jobs:
             if [ ! -f "$test_file" ]; then
               continue
             fi
-            python -m pytest "$test_file" --tb=no -q 2>/dev/null
-            if [ $? -ne 0 ]; then
+            if ! python -m pytest "$test_file" --tb=no -q 2>/dev/null; then
               TO_IMPLEMENT+=("$f")
               echo "  → à implémenter : $f"
             else

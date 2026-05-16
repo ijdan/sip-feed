@@ -129,6 +129,8 @@ Trois workflows GitHub Actions s'enchaînent quand tu pousses un `.feature` Gher
 - Step definitions : `tests/acceptance/test_<slug>.py`.
 - Code applicatif : `backend/app/features/<slug>/` (1 dossier par feature, contient les modules Python).
 
+> **Important — déclenchement du pipeline** : les workflows `generate-acceptance-tests.yml` et `implement-feature.yml` ne se déclenchent **que** sur les branches `feature/**`. Les branches de travail Claude (`claude/**`) n'activent pas le pipeline. Quand une session Claude rédige un `.feature` sur une branche `claude/**`, il faut créer une branche `feature/<slug>` et y pousser le fichier pour lancer l'automatisation.
+
 ## Conventions implicites
 
 - **Tout est en français** dans le code, les logs, les commentaires, les messages d'erreur API. Garde cette convention.

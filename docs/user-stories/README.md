@@ -31,6 +31,7 @@ Ce dossier contient les user stories de l'application Sip-feed, organisées par 
 |---|---|---|
 | 12 | [12-collector-pipeline.md](./12-collector-pipeline.md) | Pipeline du collector : scraping, parsing, enrichissement, retention |
 | 13 | [13-security-scan-ci.md](./13-security-scan-ci.md) | Scanner sécurité statique + workflow CI |
+| 14 | [14-admin-daily-log-analysis.md](./14-admin-daily-log-analysis.md) | Analyse quotidienne des logs GCP par LLM + UI admin |
 
 ## Format type de chaque fichier
 
@@ -74,6 +75,7 @@ Ce dossier contient les user stories de l'application Sip-feed, organisées par 
   - `US-RPT-*` / `US-LOG-*` : rapport + logs
   - `US-COL-PIPE-*` : pipeline collector interne
   - `US-SEC-*` : scanner sécurité
+  - `US-DLA-*` : analyse quotidienne des logs GCP
 
 ## Sources d'analyse
 

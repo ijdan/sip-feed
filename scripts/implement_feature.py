@@ -10,8 +10,9 @@ Boucle agentique avec tool use Claude API :
   - run_pytest(test_path)
   - list_directory(path)
 
-Périmètre d'écriture restreint à `backend/app/features/<slug>/` (et le test
-correspondant si Claude doit corriger une erreur de step definition).
+Périmètre d'écriture : tout le repo sauf .github/ et les fichiers .env.
+L'agent explore (CLAUDE.md, search_code, read_file) puis modifie les
+fichiers de production existants (routers, collector, frontend, etc.).
 
 Usage :
     python scripts/implement_feature.py features/hello.feature
@@ -42,10 +43,9 @@ MAX_TOKENS_PER_TURN = 8192
 PYTEST_TIMEOUT_SEC = 90
 REPO_ROOT = Path.cwd()
 
-ALLOWED_WRITE_PREFIXES = (
-    "backend/app/features/",
-    "tests/acceptance/",
-)
+# Écriture interdite sur ces chemins (sécurité)
+FORBIDDEN_WRITE_PREFIXES = (".github/",)
+FORBIDDEN_WRITE_NAMES = {".env", ".env.local", ".env.production"}
 
 TOOLS = [
     {
@@ -62,8 +62,8 @@ TOOLS = [
     {
         "name": "write_file",
         "description": (
-            "Écrit (ou écrase) un fichier. Écriture autorisée uniquement sous "
-            "backend/app/features/ ou tests/acceptance/."
+            "Écrit (ou écrase) un fichier. Interdit dans .github/ et les fichiers .env. "
+            "Préfère edit_file pour les fichiers existants (diff minimal)."
         ),
         "input_schema": {
             "type": "object",
@@ -115,6 +115,18 @@ TOOLS = [
             "required": ["path"],
         },
     },
+    {
+        "name": "search_code",
+        "description": "Grep récursif insensible à la casse dans les fichiers .py/.ts/.tsx/.feature/.md du repo. Utile pour trouver où une fonction, variable ou concept est défini ou utilisé.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "pattern": {"type": "string", "description": "Expression à rechercher (grep -i)."},
+                "path": {"type": "string", "description": "Répertoire de recherche (défaut: '.' = tout le repo)."},
+            },
+            "required": ["pattern"],
+        },
+    },
 ]
 
 
@@ -152,8 +164,10 @@ def tool_write_file(path: str, content: str) -> tuple[str, bool]:
     if p is None:
         return f"Erreur : chemin invalide '{path}'", True
     rel = str(p)
-    if not any(rel.startswith(pref) for pref in ALLOWED_WRITE_PREFIXES):
-        return f"Erreur : écriture refusée hors de {ALLOWED_WRITE_PREFIXES}", True
+    if any(rel.startswith(pref) for pref in FORBIDDEN_WRITE_PREFIXES):
+        return f"Erreur : écriture refusée dans {rel} (zone protégée)", True
+    if Path(rel).name in FORBIDDEN_WRITE_NAMES:
+        return f"Erreur : écriture refusée sur {rel} (fichier sensible)", True
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(content, encoding="utf-8")
     return f"Écrit {len(content)} caractères dans {p}", False
@@ -164,8 +178,10 @@ def tool_edit_file(path: str, old_string: str, new_string: str) -> tuple[str, bo
     if p is None:
         return f"Erreur : chemin invalide '{path}'", True
     rel = str(p)
-    if not any(rel.startswith(pref) for pref in ALLOWED_WRITE_PREFIXES):
-        return f"Erreur : édition refusée hors de {ALLOWED_WRITE_PREFIXES}", True
+    if any(rel.startswith(pref) for pref in FORBIDDEN_WRITE_PREFIXES):
+        return f"Erreur : écriture refusée dans {rel} (zone protégée)", True
+    if Path(rel).name in FORBIDDEN_WRITE_NAMES:
+        return f"Erreur : écriture refusée sur {rel} (fichier sensible)", True
     if not p.exists():
         return f"Erreur : fichier introuvable '{path}'", True
     content = p.read_text(encoding="utf-8")
@@ -214,12 +230,35 @@ def tool_list_directory(path: str) -> tuple[str, bool]:
     return "\n".join(entries) or "(vide)", False
 
 
+def tool_search_code(pattern: str, path: str = ".") -> tuple[str, bool]:
+    """Grep récursif (insensible à la casse) dans les fichiers source du repo."""
+    try:
+        result = subprocess.run(
+            [
+                "grep", "-r", "-n", "-i",
+                "--include=*.py", "--include=*.ts", "--include=*.tsx",
+                "--include=*.feature", "--include=*.md",
+                pattern, path,
+            ],
+            capture_output=True, text=True, timeout=30, cwd=REPO_ROOT,
+        )
+        out = result.stdout
+        if len(out) > 4000:
+            out = out[:4000] + "\n... [TRONQUÉ]"
+        return out or "(aucun résultat)", False
+    except subprocess.TimeoutExpired:
+        return "Erreur : grep a dépassé 30s", True
+    except Exception as exc:
+        return f"Erreur grep : {exc}", True
+
+
 TOOL_HANDLERS = {
     "read_file": tool_read_file,
     "write_file": tool_write_file,
     "edit_file": tool_edit_file,
     "run_pytest": tool_run_pytest,
     "list_directory": tool_list_directory,
+    "search_code": tool_search_code,
 }
 
 
@@ -233,46 +272,53 @@ def handle_tool_call(name: str, params: dict) -> tuple[str, bool]:
         return f"Erreur : paramètres incorrects pour {name} : {exc}", True
 
 
-SYSTEM_PROMPT = """Tu es un développeur Python senior expert en pytest-bdd v7+ et FastAPI.
+SYSTEM_PROMPT = """Tu es un développeur fullstack senior expert en Python/FastAPI, Next.js et Google Cloud.
 
-Mission : implémenter le code applicatif d'une feature Gherkin pour que ses
-tests d'acceptance passent. Tu disposes de tools pour lire, écrire et tester.
+Projet : Sip-feed — agrégateur de news tech sur GCP.
+Architecture : 3 services indépendants (backend FastAPI, frontend Next.js 14, collector Python) + Firestore.
 
-Périmètre d'écriture :
-- `backend/app/features/<slug>/` : c'est ICI que va le code applicatif.
-- `tests/acceptance/test_<slug>.py` : modifie-le uniquement si une step
-  definition est cassée et empêche l'exécution. Ne modifie pas la logique
-  des scénarios eux-mêmes.
+Mission : implémenter une feature décrite en Gherkin pour que ses tests d'acceptance passent,
+en modifiant les fichiers de PRODUCTION dans les services concernés.
 
-Méthode :
-1. Lis le .feature pour comprendre l'intention métier.
-2. Lis le test d'acceptance pour voir les step definitions actuelles.
-3. Lance pytest pour voir l'état initial.
-4. Implémente le code minimal nécessaire.
-5. Re-teste. Itère jusqu'au vert.
+Approche obligatoire :
+1. Lis CLAUDE.md — c'est la carte du projet, elle décrit tous les fichiers clés.
+2. Lis le .feature pour comprendre l'intention métier.
+3. Lis le test d'acceptance pour voir ce qui est testé.
+4. Lance run_pytest pour voir l'état initial.
+5. Utilise search_code et read_file pour localiser les fichiers de production à modifier.
+6. Modifie les fichiers de production (backend/app/routers/, collector/main.py, frontend/src/, etc.).
+7. Re-teste. Itère jusqu'au vert ou jusqu'à épuisement du budget de turns.
 
-Conventions :
-- Tout en français.
-- Le moins de code possible. Pas d'abstraction prématurée.
-- Si tu crées un nouveau module Python, ajoute un `__init__.py` à côté.
-- Si tu modifies `backend/app/main.py` pour brancher un router, mentionne-le.
+Périmètre d'écriture : tout le repo SAUF .github/ et les fichiers .env.
+Tu PEUX modifier : backend/app/routers/, backend/app/models/, collector/, frontend/src/, infrastructure/.
+Tu NE CRÉES PAS de code dans backend/app/features/ — c'est l'ancienne approche isolée, à ne pas utiliser.
 
-Quand les tests passent, dis « TESTS VERTS » et arrête.
+Conventions du projet (respecte-les impérativement) :
+- Tout le code, les logs, les commentaires et les messages d'erreur API sont en FRANÇAIS.
+- Pas de linter Python (pas de black/ruff/flake8 à invoquer).
+- Frontend : TypeScript strict, aucun framework de test JS configuré.
+- Le moins de code possible. Pas d'abstraction prématurée. Pas de commentaires évidents.
+- Quand tu modifies un fichier existant, préfère edit_file à write_file (diff minimal).
+
+Quand tous les tests passent (exit code 0), réponds « TESTS VERTS » et arrête-toi.
 """
 
 
 def build_initial_prompt(feature_path: Path, test_path: Path) -> str:
-    return f"""Implémente le code applicatif pour la feature `{feature_path.name}`.
+    return f"""Implémente le code nécessaire pour que les tests d'acceptance de `{feature_path.name}` passent.
 
-Fichiers de référence (lis-les avec read_file) :
-- `{feature_path}` : la spec Gherkin.
-- `{test_path}` : les step definitions pytest-bdd.
+PREMIÈRE ACTION OBLIGATOIRE : lis `CLAUDE.md` pour comprendre l'architecture complète du projet.
 
-Le code applicatif doit aller dans `backend/app/features/{slugify(feature_path)}/`.
+Ensuite, dans l'ordre :
+1. Lis `{feature_path}` — la spec Gherkin.
+2. Lis `{test_path}` — les step definitions pytest-bdd.
+3. Lance run_pytest sur `{test_path}` pour voir l'état initial.
+4. Utilise search_code et read_file pour identifier les fichiers de production à modifier.
+5. Implémente les changements dans les vrais fichiers existants du projet.
+6. Re-teste et itère.
 
-Commence par lire les deux fichiers, puis lance run_pytest sur `{test_path}`
-pour voir l'état actuel. Implémente ensuite ce qu'il faut, puis re-teste.
-Arrête-toi dès que pytest renvoie exit code 0 (réponds alors « TESTS VERTS »).
+Important : les changements vont dans les fichiers de production existants,
+PAS dans backend/app/features/. Explore le repo pour trouver où brancher la logique.
 """
 
 

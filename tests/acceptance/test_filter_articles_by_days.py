@@ -27,27 +27,33 @@ def _date_depuis_label(label: str) -> datetime:
     raise ValueError(f"Label de date non reconnu : {label!r}")
 
 
-@given("que l'API backend est démarrée")
+@given("l'API backend est démarrée")
 def api_backend_demarree(contexte):
-    raise NotImplementedError("L'implémentation applicative est à fournir")
+    from fastapi.testclient import TestClient
+    from backend.app.features.filter_articles_by_days.api import app
+
+    contexte["client"] = TestClient(app)
 
 
-@given(parsers.parse("que Firestore contient les articles suivants :\n{table}"))
-def firestore_contient_articles(contexte, table):
-    raise NotImplementedError("L'implémentation applicative est à fournir")
+@given("Firestore contient les articles suivants :")
+def firestore_contient_articles_tableau(contexte, datatable):
+    # datatable : liste de lignes ; première ligne = en-têtes
+    entetes = datatable[0]
+    for ligne in datatable[1:]:
+        row = dict(zip(entetes, ligne))
+        article_id = row["id"]
+        collected_at = _date_depuis_label(row["collected_at"])
+        existant = contexte["articles_firestore"].get(article_id, {})
+        existant.update({"id": article_id, "collected_at": collected_at})
+        contexte["articles_firestore"][article_id] = existant
 
 
-@given("que Firestore contient les articles suivants :")
-def firestore_contient_articles_tableau(contexte):
-    raise NotImplementedError("L'implémentation applicative est à fournir")
-
-
-@given(parsers.parse('que le paramètre "retention_days" vaut {valeur:d}'))
+@given(parsers.parse('le paramètre "retention_days" vaut {valeur:d}'))
 def parametre_retention_days(contexte, valeur):
     contexte["retention_days"] = valeur
 
 
-@given(parsers.parse('que l\'article "{article_id}" a la catégorie "{categorie}"'))
+@given(parsers.parse('l\'article "{article_id}" a la catégorie "{categorie}"'))
 def article_avec_categorie(contexte, article_id, categorie):
     if article_id in contexte["articles_firestore"]:
         contexte["articles_firestore"][article_id]["category"] = categorie
@@ -55,20 +61,32 @@ def article_avec_categorie(contexte, article_id, categorie):
         contexte["articles_firestore"][article_id] = {"category": categorie}
 
 
+def _appeler_articles(contexte, params=None):
+    from backend.app.features.filter_articles_by_days import service
+
+    service.set_articles(list(contexte["articles_firestore"].values()))
+    service.set_retention_days(contexte["retention_days"])
+    response = contexte["client"].get("/articles", params=params or {})
+    contexte["reponse"] = response.json()
+
+
 @when("je requête GET /articles")
 def requete_get_articles(contexte):
-    raise NotImplementedError("L'implémentation applicative est à fournir")
+    _appeler_articles(contexte)
 
 
 @when(parsers.parse("je requête GET /articles?category={categorie}"))
 def requete_get_articles_avec_categorie(contexte, categorie):
     contexte["category"] = categorie
-    raise NotImplementedError("L'implémentation applicative est à fournir")
+    _appeler_articles(contexte, {"category": categorie})
 
 
 @when("le collector termine une exécution")
 def collector_termine_execution(contexte):
-    raise NotImplementedError("L'implémentation applicative est à fournir")
+    from backend.app.features.filter_articles_by_days import service
+
+    service.set_articles(list(contexte["articles_firestore"].values()))
+    service.executer_collector()
 
 
 @then(parsers.parse('la réponse contient les articles "{id1}" et "{id2}"'))
@@ -114,7 +132,11 @@ def total_retourne(contexte, total):
 
 @then(parsers.parse('les articles "{id1}" et "{id2}" existent toujours dans la collection Firestore "{collection}"'))
 def articles_existent_dans_firestore(contexte, id1, id2, collection):
-    raise NotImplementedError("L'implémentation applicative est à fournir")
+    from backend.app.features.filter_articles_by_days import service
+
+    ids = service.lister_ids_collection(collection)
+    assert id1 in ids, f"L'article {id1!r} devrait toujours exister dans la collection {collection!r}"
+    assert id2 in ids, f"L'article {id2!r} devrait toujours exister dans la collection {collection!r}"
 
 
 @then(parsers.parse('la réponse contient uniquement l\'article "{article_id}"'))

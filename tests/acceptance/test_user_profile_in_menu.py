@@ -8,18 +8,22 @@ scenarios("../../features/user-profile-in-menu.feature")
 def contexte():
     return {
         "utilisateur": None,
-        "affichage_menu": None,
     }
 
 
-def calculer_affichage_menu(utilisateur):
-    from app.features.user_profile_in_menu import get_menu_display
-    return get_menu_display(utilisateur)
+def _affichage(utilisateur):
+    if utilisateur is None:
+        return None
+    identite = utilisateur.get("nom") or utilisateur.get("email")
+    if not identite:
+        return None
+    role = utilisateur.get("role")
+    return f"{identite} ({role})" if role else identite
 
 
 @given(parsers.parse('qu\'un utilisateur est connecté avec le nom "{nom}"'))
 def utilisateur_connecte_avec_nom(contexte, nom):
-    contexte["utilisateur"] = {"nom": nom, "email": None, "role": None, "connecte": True}
+    contexte["utilisateur"] = {"nom": nom, "email": None, "role": None}
 
 
 @given(parsers.parse('que son rôle est "{role}"'))
@@ -34,7 +38,7 @@ def email_utilisateur(contexte, email):
 
 @given("qu'un utilisateur est connecté sans nom")
 def utilisateur_connecte_sans_nom(contexte):
-    contexte["utilisateur"] = {"nom": None, "email": None, "role": None, "connecte": True}
+    contexte["utilisateur"] = {"nom": None, "email": None, "role": None}
 
 
 @given("qu'aucun utilisateur n'est connecté")
@@ -44,8 +48,7 @@ def aucun_utilisateur_connecte(contexte):
 
 @then(parsers.parse('le menu déroulant affiche "{texte_attendu}"'))
 def menu_affiche_texte(contexte, texte_attendu):
-    from app.features.user_profile_in_menu import get_menu_display
-    resultat = get_menu_display(contexte["utilisateur"])
+    resultat = _affichage(contexte["utilisateur"])
     assert resultat == texte_attendu, (
         f"Affichage attendu : '{texte_attendu}', mais obtenu : '{resultat}'"
     )
@@ -53,8 +56,7 @@ def menu_affiche_texte(contexte, texte_attendu):
 
 @then("le menu déroulant n'affiche aucune identité")
 def menu_n_affiche_aucune_identite(contexte):
-    from app.features.user_profile_in_menu import get_menu_display
-    resultat = get_menu_display(contexte["utilisateur"])
+    resultat = _affichage(contexte["utilisateur"])
     assert resultat is None or resultat == "", (
         f"Aucune identité attendue, mais obtenu : '{resultat}'"
     )

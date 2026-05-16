@@ -73,11 +73,9 @@ export default function BurgerMenu() {
                 style={{ color: "var(--text)" }}>
                 👤 Profil
               </Link>
-              {session?.user?.email && (
-                <div className="px-4 py-1.5 text-xs truncate" style={{ color: "var(--text-muted)" }}>
-                  {session.user.email}
-                </div>
-              )}
+              <div className="px-4 py-1.5 text-xs truncate" style={{ color: "var(--text-muted)" }}>
+                {session?.user?.name || session?.user?.email} ({((session as unknown) as import("@/lib/types").AppSession)?.role})
+              </div>
               <button
                 onClick={() => { signOut({ callbackUrl: "/" }); setOpen(false); }}
                 className="w-full flex items-center gap-2 px-4 py-2.5 text-sm transition hover:opacity-70 text-left"

@@ -1,3 +1,4 @@
+# Tests d'acceptance — filter-articles-by-days (v2 : implémentation production)
 from pytest_bdd import scenarios, given, when, then, parsers
 from datetime import datetime, timedelta, timezone
 import pytest

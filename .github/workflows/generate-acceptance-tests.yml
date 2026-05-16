@@ -44,7 +44,8 @@ jobs:
             git fetch origin main --depth=1
             BEFORE="origin/main"
           fi
-          FILES=$(git diff --name-only "$BEFORE" "$AFTER" -- 'features/**/*.feature' 2>/dev/null || echo "")
+          # git diff utilise du pathspec, pas du glob gitignore : on filtre par dossier puis par extension
+          FILES=$(git diff --name-only "$BEFORE" "$AFTER" -- 'features/' 2>/dev/null | grep '\.feature$' || true)
           {
             echo "files<<EOF"
             echo "$FILES"

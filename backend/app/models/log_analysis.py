@@ -18,6 +18,8 @@ class LogAnalysis(BaseModel):
 
     date: str
     generated_at: str
+    period_start: str = ""
+    period_end: str = ""
     logs_count: int
     resume: str
     items: list[LogAnalysisItem] = []

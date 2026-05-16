@@ -124,9 +124,9 @@ export default function LogAnalysisPage() {
             style={{ backgroundColor: "var(--surface)", borderColor: "var(--border)" }}>
             <div className="flex items-center justify-between gap-4 flex-wrap">
               <p className="text-xs" style={{ color: "var(--text-muted)" }}>
-                {new Date(data.date).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })}
-                {" · "}{data.logs_count} entrées analysées
-                {" · "}{new Date(data.generated_at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
+                {data.date}
+                {" · "}{data.logs_count} entrée{data.logs_count !== 1 ? "s" : ""} analysée{data.logs_count !== 1 ? "s" : ""}
+                {" · "}Généré le {new Date(data.generated_at).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
               </p>
             </div>
             <p className="text-sm leading-relaxed" style={{ color: "var(--text)" }}>{data.resume}</p>

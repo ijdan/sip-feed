@@ -1,7 +1,7 @@
 """Point d'entrée du Cloud Run Job log-analyzer.
 
 Exécuté chaque nuit à 05h00 CET par Cloud Scheduler.
-Réutilise l'image Docker du collector (même dépendances).
+Réutilise l'image Docker du collector (même dépendances Dockerfile).
 """
 import logging
 import os

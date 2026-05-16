@@ -238,6 +238,8 @@ def run_log_analysis(
     document = {
         "date": cle,
         "generated_at": now.isoformat(),
+        "period_start": period_start.isoformat(),
+        "period_end": period_end.isoformat(),
         "logs_count": len(entries),
         "resume": rapport["resume"],
         "items": rapport["items"],

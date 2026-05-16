@@ -1,0 +1,183 @@
+name: 2. Implémentation de la feature
+
+# Déclenché :
+#  - automatiquement après succès du workflow 1 (workflow_run)
+#  - manuellement sur push feature/** si tests/acceptance/** change SANS [skip ci]
+#    (cas où le développeur écrit lui-même ses step definitions et veut juste
+#    déclencher l'implémentation)
+
+on:
+  workflow_run:
+    workflows: ["1. Génération des tests d'acceptance"]
+    types: [completed]
+    branches: ['feature/**']
+  push:
+    branches:
+      - 'feature/**'
+    paths:
+      - 'tests/acceptance/**'
+
+jobs:
+  implement:
+    # Sur workflow_run : uniquement si le wf1 a réussi.
+    # Sur push : uniquement si pas de [skip ci] dans le commit (le bot wf1 met
+    # toujours [skip ci], donc ce filtre évite le double-trigger).
+    if: |
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') ||
+      (github.event_name == 'push' && !contains(github.event.head_commit.message, '[skip ci]'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Déterminer la branche cible
+        id: branch
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            BRANCH="${{ github.event.workflow_run.head_branch }}"
+            SHA="${{ github.event.workflow_run.head_sha }}"
+          else
+            BRANCH="${{ github.ref_name }}"
+            SHA="${{ github.sha }}"
+          fi
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "Branche cible : $BRANCH"
+
+      - name: Checkout (avec la bonne branche)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.branch.outputs.branch }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Installer toutes les dépendances
+        run: |
+          pip install --quiet -r scripts/requirements.txt
+          pip install --quiet -r tests/requirements.txt
+          pip install --quiet -r backend/requirements.txt
+
+      - name: Détecter les features sans implémentation
+        id: features
+        run: |
+          # Liste les .feature qui ont un test_<slug>.py mais pas de backend/app/features/<slug>/
+          TO_IMPLEMENT=()
+          for f in features/*.feature; do
+            [ -e "$f" ] || continue
+            slug=$(basename "$f" .feature | tr '[:upper:]-' '[:lower:]_' | tr -cd 'a-z0-9_')
+            test_file="tests/acceptance/test_${slug}.py"
+            impl_dir="backend/app/features/${slug}"
+            if [ -f "$test_file" ] && [ ! -d "$impl_dir" ]; then
+              TO_IMPLEMENT+=("$f")
+              echo "  → à implémenter : $f"
+            fi
+          done
+          if [ ${#TO_IMPLEMENT[@]} -eq 0 ]; then
+            echo "Aucune feature à implémenter."
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            # On traite la première trouvée (1 feature = 1 PR)
+            echo "feature=${TO_IMPLEMENT[0]}" >> "$GITHUB_OUTPUT"
+            slug=$(basename "${TO_IMPLEMENT[0]}" .feature | tr '[:upper:]-' '[:lower:]_' | tr -cd 'a-z0-9_')
+            echo "slug=$slug" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Implémenter la feature via Claude (Opus 4.7, max 15 turns)
+        id: implement
+        if: steps.features.outputs.found == 'true'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          MAX_TURNS: '15'
+          PYTHONPATH: ${{ github.workspace }}/backend
+        run: |
+          set +e
+          python scripts/implement_feature.py "${{ steps.features.outputs.feature }}"
+          EXIT_CODE=$?
+          echo "exit_code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
+          exit 0  # on continue même si tests rouges, pour ouvrir la PR avec label
+
+      - name: Commit et push le code généré
+        if: steps.features.outputs.found == 'true'
+        run: |
+          git config user.name "claude-bot"
+          git config user.email "claude-bot@users.noreply.github.com"
+
+          git add backend/app/features/ tests/acceptance/
+
+          if git diff --cached --quiet; then
+            echo "Aucun changement à commiter (le bot n'a rien produit)"
+            exit 0
+          fi
+
+          STATUS_LABEL=$([ "${{ steps.implement.outputs.exit_code }}" = "0" ] \
+            && echo "tests verts" || echo "tests rouges, review humaine requise")
+
+          git commit -m "[skip ci] implémentation de ${{ steps.features.outputs.slug }} (${STATUS_LABEL})"
+          git push origin "HEAD:${{ steps.branch.outputs.branch }}"
+
+      - name: Ouvrir la PR draft vers main
+        if: steps.features.outputs.found == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BRANCH="${{ steps.branch.outputs.branch }}"
+          SLUG="${{ steps.features.outputs.slug }}"
+          EXIT="${{ steps.implement.outputs.exit_code }}"
+
+          # PR existe déjà ?
+          EXISTING=$(gh pr list --head "$BRANCH" --base main --state open --json number --jq '.[0].number' || echo "")
+
+          if [ -n "$EXISTING" ]; then
+            echo "PR #$EXISTING existe déjà — mise à jour du body uniquement"
+            if [ "$EXIT" = "0" ]; then
+              gh pr edit "$EXISTING" --remove-label "needs-human-review" || true
+              gh pr comment "$EXISTING" --body "🟢 Nouveau push : tests d'acceptance toujours verts."
+            else
+              gh pr edit "$EXISTING" --add-label "needs-human-review" || true
+              gh pr comment "$EXISTING" --body "🔴 Nouveau push : tests rouges après max-turns. Review humaine requise."
+            fi
+            exit 0
+          fi
+
+          if [ "$EXIT" = "0" ]; then
+            TITLE="feat: $SLUG"
+            BODY="Feature implémentée automatiquement par Claude (Opus 4.7).
+
+          ## Statut
+          🟢 **Tests d'acceptance verts** — prêt pour review.
+
+          ## Fichiers concernés
+          - \`features/$SLUG.feature\`
+          - \`tests/acceptance/test_$SLUG.py\`
+          - \`backend/app/features/$SLUG/\`
+
+          🤖 Generated by implement-feature.yml"
+            gh pr create --draft --base main --head "$BRANCH" --title "$TITLE" --body "$BODY"
+          else
+            TITLE="feat(WIP): $SLUG (needs human review)"
+            BODY="Feature implémentée partiellement par Claude (Opus 4.7).
+
+          ## Statut
+          🔴 **Tests d'acceptance toujours rouges** après 15 turns. Intervention humaine requise.
+
+          ## Fichiers concernés
+          - \`features/$SLUG.feature\`
+          - \`tests/acceptance/test_$SLUG.py\`
+          - \`backend/app/features/$SLUG/\` (état partiel)
+
+          ## Logs
+          Voir l'onglet Actions du run pour les logs détaillés et le diff produit.
+
+          🤖 Generated by implement-feature.yml"
+            # Crée le label s'il n'existe pas (idempotent)
+            gh label create "needs-human-review" --color "FBCA04" --description "PR nécessitant une revue humaine" --force 2>/dev/null || true
+            gh pr create --draft --base main --head "$BRANCH" --title "$TITLE" --body "$BODY" --label "needs-human-review"
+          fi

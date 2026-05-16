@@ -1,4 +1,5 @@
 # language: fr
+# v2 — implémentation dans les fichiers de production (articles.py, collector, frontend)
 Fonctionnalité: Filtrage des articles par ancienneté sans suppression
 
   Le paramètre "retention_days" contrôle la fenêtre temporelle des articles

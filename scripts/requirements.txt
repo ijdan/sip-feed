@@ -1,0 +1,2 @@
+# Dépendances des scripts d'automation Claude (CI uniquement).
+anthropic>=0.40.0

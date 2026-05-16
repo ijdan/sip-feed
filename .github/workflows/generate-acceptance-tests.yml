@@ -1,0 +1,100 @@
+name: 1. Génération des tests d'acceptance
+
+# Déclenché quand un .feature est ajouté ou modifié sur une branche feature/**.
+# Ignore les push qui contiennent [skip ci] dans le message du dernier commit
+# (typiquement les commits faits par le bot lui-même).
+
+on:
+  push:
+    branches:
+      - 'feature/**'
+    paths:
+      - 'features/**/*.feature'
+
+jobs:
+  generate:
+    if: ${{ !contains(github.event.head_commit.message, '[skip ci]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout (full history pour diff)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Installer le SDK Anthropic
+        run: pip install --quiet -r scripts/requirements.txt
+
+      - name: Détecter les .feature modifiés dans le push
+        id: changed
+        run: |
+          BEFORE="${{ github.event.before }}"
+          AFTER="${{ github.event.after }}"
+          # Nouveau branch (premier push) → diff vs main
+          if [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            git fetch origin main --depth=1
+            BEFORE="origin/main"
+          fi
+          FILES=$(git diff --name-only "$BEFORE" "$AFTER" -- 'features/**/*.feature' 2>/dev/null || echo "")
+          {
+            echo "files<<EOF"
+            echo "$FILES"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+          echo "Fichiers .feature modifiés dans ce push :"
+          echo "$FILES"
+
+      - name: Générer les step definitions via Claude
+        if: steps.changed.outputs.files != ''
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          mapfile -t FEATURE_FILES <<< "${{ steps.changed.outputs.files }}"
+          # Filtre les lignes vides
+          ARGS=()
+          for f in "${FEATURE_FILES[@]}"; do
+            [ -n "$f" ] && ARGS+=("$f")
+          done
+          if [ ${#ARGS[@]} -eq 0 ]; then
+            echo "Aucun .feature à traiter après filtrage des lignes vides."
+            exit 0
+          fi
+          python scripts/generate_acceptance_tests.py "${ARGS[@]}"
+
+      - name: Commit et push les step definitions générées
+        if: steps.changed.outputs.files != ''
+        run: |
+          git config user.name "claude-bot"
+          git config user.email "claude-bot@users.noreply.github.com"
+
+          # Stage les nouveaux fichiers
+          git add tests/acceptance/
+
+          # Rien à commit si pas de changement (idempotence)
+          if git diff --cached --quiet; then
+            echo "Aucun changement dans tests/acceptance/ — pas de commit"
+            exit 0
+          fi
+
+          # Liste compacte des slugs pour le message de commit
+          FIRST=$(echo "${{ steps.changed.outputs.files }}" | head -n1)
+          SLUG=$(basename "$FIRST" .feature)
+          COUNT=$(echo "${{ steps.changed.outputs.files }}" | grep -c '.feature' || echo "1")
+
+          if [ "$COUNT" = "1" ]; then
+            MSG="[skip ci] tests d'acceptance générés pour ${SLUG}"
+          else
+            MSG="[skip ci] tests d'acceptance générés pour ${COUNT} features (${SLUG}, ...)"
+          fi
+
+          git commit -m "$MSG"
+          git push origin HEAD:${{ github.ref_name }}

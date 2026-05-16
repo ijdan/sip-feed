@@ -1,6 +1,8 @@
 import logging
 logger = logging.getLogger(__name__)
 
+from datetime import datetime, timedelta, timezone
+
 from fastapi import APIRouter, HTTPException, Query
 from google.cloud.firestore_v1.aggregation import AggregationQuery
 from app.db.firestore import get_db
@@ -9,6 +11,35 @@ from app.models.article import Article, ArticleList
 router = APIRouter()
 
 CATEGORIES = ["IA", "DevOps", "Cloud", "Sécurité", "Dev", "IT", "Autre"]
+
+
+def _get_retention_days() -> int:
+    """Lit retention_days depuis settings/global (0 = illimité)."""
+    try:
+        doc = get_db().collection("settings").document("global").get()
+        if doc.exists:
+            return int(doc.to_dict().get("retention_days", 0) or 0)
+    except Exception as e:
+        logger.warning(f"Impossible de lire retention_days : {e}")
+    return 0
+
+
+def _est_dans_fenetre(data: dict, retention_days: int) -> bool:
+    """Vrai si l'article est dans la fenêtre de rétention (illimité si <= 0)."""
+    if retention_days <= 0:
+        return True
+    collected_at = data.get("collected_at")
+    if not collected_at:
+        return True
+    try:
+        if isinstance(collected_at, str):
+            collected_at = datetime.fromisoformat(collected_at.replace("Z", "+00:00"))
+        if collected_at.tzinfo is None:
+            collected_at = collected_at.replace(tzinfo=timezone.utc)
+    except Exception:
+        return True
+    cutoff = datetime.now(tz=timezone.utc) - timedelta(days=retention_days)
+    return collected_at >= cutoff
 
 
 @router.get("/stats")
@@ -51,14 +82,24 @@ def list_articles(
     if source_id:
         query = query.where("source_id", "==", source_id)
 
-    # C1 : total via aggregation (pas de chargement en mémoire)
-    total = _count_query(query)
+    retention_days = _get_retention_days()
 
-    # Fetch uniquement la page demandée
-    start = (page - 1) * page_size
-    page_docs = list(query.offset(start).limit(page_size).stream())
+    if retention_days <= 0:
+        # C1 : total via aggregation (pas de chargement en mémoire)
+        total = _count_query(query)
+        start = (page - 1) * page_size
+        page_docs = list(query.offset(start).limit(page_size).stream())
+        items = [Article(**{**doc.to_dict(), "id": doc.id}) for doc in page_docs]
+    else:
+        # Filtrage par fenêtre de rétention en mémoire — Firestore ne permet pas
+        # un where("collected_at",...) combiné à order_by("published_at").
+        all_docs = list(query.stream())
+        kept = [doc for doc in all_docs if _est_dans_fenetre(doc.to_dict(), retention_days)]
+        total = len(kept)
+        start = (page - 1) * page_size
+        page_docs = kept[start:start + page_size]
+        items = [Article(**{**doc.to_dict(), "id": doc.id}) for doc in page_docs]
 
-    items = [Article(**{**doc.to_dict(), "id": doc.id}) for doc in page_docs]
     return ArticleList(items=items, total=total, page=page, page_size=page_size)
 
 

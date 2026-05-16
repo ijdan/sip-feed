@@ -59,22 +59,15 @@ def already_exists(url: str) -> bool:
 
 
 def apply_retention(retention_days: int) -> int:
-    """Supprime les articles plus anciens que retention_days. Retourne le nombre supprimé."""
-    if retention_days <= 0:
-        return 0
-    cutoff = (datetime.utcnow() - timedelta(days=retention_days)).isoformat()
-    docs = list(db.collection("articles").where("collected_at", "<", cutoff).stream())
-    if not docs:
-        return 0
-    batch = db.batch()
-    for i, doc in enumerate(docs):
-        batch.delete(doc.reference)
-        if (i + 1) % 500 == 0:
-            batch.commit()
-            batch = db.batch()
-    batch.commit()
-    logger.info(f"Rétention : {len(docs)} article(s) supprimé(s) (plus anciens que {retention_days}j)")
-    return len(docs)
+    """No-op : la rétention est désormais appliquée en lecture côté API.
+
+    Les articles anciens restent stockés dans Firestore et sont filtrés
+    à la volée par backend/app/routers/articles.py selon `retention_days`.
+    Cf. features/filter-articles-by-days.feature.
+    """
+    if retention_days > 0:
+        logger.info(f"Rétention {retention_days}j appliquée en lecture (API) — aucune suppression côté collector.")
+    return 0
 
 
 def run():

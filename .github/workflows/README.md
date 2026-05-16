@@ -24,7 +24,7 @@ Ce dossier contient les workflows GitHub Actions de Sip-feed. Deux familles :
 │ Workflow 1 : generate-acceptance-tests.yml          (Sonnet 4.6, 1 turn)  │
 │   • Détecte les .feature modifiés                                         │
 │   • Génère tests/acceptance/test_<slug>.py via Claude API                 │
-│   • Commit "[skip ci] ..." + push sur feature/<slug>                      │
+│   • Commit (author=claude-bot) + push sur feature/<slug>                  │
 └───────────────────────────────────┬───────────────────────────────────────┘
                                     │ workflow_run
                                     ▼
@@ -33,7 +33,7 @@ Ce dossier contient les workflows GitHub Actions de Sip-feed. Deux familles :
 │   • Détecte la feature avec test mais sans implémentation                 │
 │   • Boucle agentique avec tools read/write/edit/pytest/ls                 │
 │   • Périmètre d'écriture : backend/app/features/ + tests/acceptance/      │
-│   • Commit "[skip ci] ..." + push                                         │
+│   • Commit (author=claude-bot) + push                                     │
 │   • Ouvre PR DRAFT vers main :                                            │
 │       ▸ 🟢 si tests verts                                                  │
 │       ▸ 🔴 + label `needs-human-review` si max-turns atteint              │
@@ -51,13 +51,12 @@ Ce dossier contient les workflows GitHub Actions de Sip-feed. Deux familles :
 | Fichier | Modèle | Trigger | Permissions |
 |---|---|---|---|
 | `generate-acceptance-tests.yml` | `claude-sonnet-4-6` | push `feature/**` + paths `features/**/*.feature` | `contents: write` |
-| `implement-feature.yml` | `claude-opus-4-7` | `workflow_run` après wf1, ou push direct `tests/acceptance/**` sans `[skip ci]` | `contents: write`, `pull-requests: write` |
+| `implement-feature.yml` | `claude-opus-4-7` | `workflow_run` après wf1, ou push direct `tests/acceptance/**` (auteur ≠ claude-bot) | `contents: write`, `pull-requests: write` |
 | `guard-bot-loops.yml` | — | push toutes branches | `contents: read` |
 
 ### Garde-fous
 
-- **`[skip ci]` obligatoire** sur les commits du bot (les deux workflows l'appliquent automatiquement).
-- **Filtre `if: !contains(...head_commit.message, '[skip ci]')`** au niveau job pour éviter les re-déclenchements.
+- **Filtre par auteur du commit** dans les `if:` de chaque job : `github.event.head_commit.author.email != 'claude-bot@users.noreply.github.com'`. Évite les boucles bot → bot sans polluer le message du commit. **Avantage clé** : un squash merge ne propage pas de `[skip ci]` accidentel qui bloquerait `ci-cd.yml`.
 - **`guard-bot-loops.yml`** : abort tout workflow si les 5 derniers commits consécutifs proviennent de `claude-bot`.
 - **Périmètre d'écriture** dans `scripts/implement_feature.py` : restreint à `backend/app/features/` + `tests/acceptance/`. Toute tentative ailleurs renvoie "Erreur : écriture refusée".
 - **Timeout** : 5 min sur wf1, 30 min sur wf2. Pytest timeout 90s par test. Agent loop max 15 turns.

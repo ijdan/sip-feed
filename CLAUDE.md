@@ -117,7 +117,7 @@ Trois workflows GitHub Actions s'enchaînent quand tu pousses un `.feature` Gher
 
 ### Règles strictes pour le bot Claude dans la CI
 
-- **Tout commit fait par un workflow DOIT contenir `[skip ci]`** dans son message. C'est le filtre principal contre les boucles infinies.
+- **Tout commit du bot a comme auteur `claude-bot@users.noreply.github.com`**. Les workflows filtrent sur cet email pour éviter les boucles bot → bot. On **n'utilise pas** `[skip ci]` dans le message car un squash merge en hériterait et bloquerait `ci-cd.yml` à tort.
 - **Jamais de push direct sur `main`**. Le bot ouvre toujours une PR en **draft** (`gh pr create --draft`). La validation reste humaine.
 - **Le bot ne modifie pas `main`** : il pousse sur la branche `feature/**` d'origine et y ouvre la PR.
 - **Workflow 2 a un cap de 15 turns** : si épuisé sans succès, la PR est créée quand même avec un label `needs-human-review`.

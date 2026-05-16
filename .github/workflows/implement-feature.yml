@@ -20,11 +20,12 @@ on:
 jobs:
   implement:
     # Sur workflow_run : uniquement si le wf1 a réussi.
-    # Sur push : uniquement si pas de [skip ci] dans le commit (le bot wf1 met
-    # toujours [skip ci], donc ce filtre évite le double-trigger).
+    # Sur push : filtrer par auteur claude-bot (commits du bot ne re-déclenchent
+    # pas le wf2, sinon boucle). On évite [skip ci] dans le message car le
+    # squash merge en hériterait et bloquerait ci-cd.yml ensuite.
     if: |
       (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') ||
-      (github.event_name == 'push' && !contains(github.event.head_commit.message, '[skip ci]'))
+      (github.event_name == 'push' && github.event.head_commit.author.email != 'claude-bot@users.noreply.github.com')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -120,7 +121,10 @@ jobs:
           STATUS_LABEL=$([ "${{ steps.implement.outputs.exit_code }}" = "0" ] \
             && echo "tests verts" || echo "tests rouges, review humaine requise")
 
-          git commit -m "[skip ci] implémentation de ${{ steps.features.outputs.slug }} (${STATUS_LABEL})"
+          # Pas de [skip ci] dans le message : on filtre par auteur (claude-bot)
+          # au niveau du job pour éviter les boucles. Mettre [skip ci] dans le
+          # message provoquerait le skip de ci-cd.yml lors du squash merge.
+          git commit -m "implémentation de ${{ steps.features.outputs.slug }} (${STATUS_LABEL})"
           git push origin "HEAD:${{ steps.branch.outputs.branch }}"
 
       - name: Ouvrir la PR draft vers main

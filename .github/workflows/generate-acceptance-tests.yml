@@ -13,7 +13,10 @@ on:
 
 jobs:
   generate:
-    if: ${{ !contains(github.event.head_commit.message, '[skip ci]') }}
+    # On ne se déclenche pas sur les commits du bot lui-même (évite la boucle).
+    # Filtre par auteur plutôt que par [skip ci] dans le message : un squash merge
+    # héritant des messages bot conserverait [skip ci] et bloquerait ci-cd.yml.
+    if: ${{ github.event.head_commit.author.email != 'claude-bot@users.noreply.github.com' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -92,10 +95,13 @@ jobs:
           COUNT=$(echo "${{ steps.changed.outputs.files }}" | grep -c '.feature' || echo "1")
 
           if [ "$COUNT" = "1" ]; then
-            MSG="[skip ci] tests d'acceptance générés pour ${SLUG}"
+            MSG="tests d'acceptance générés pour ${SLUG}"
           else
-            MSG="[skip ci] tests d'acceptance générés pour ${COUNT} features (${SLUG}, ...)"
+            MSG="tests d'acceptance générés pour ${COUNT} features (${SLUG}, ...)"
           fi
 
+          # Pas de [skip ci] : on filtre par auteur (claude-bot) en début de job
+          # pour éviter la boucle, sans polluer le message du commit (qui serait
+          # ensuite hérité par un squash merge et bloquerait ci-cd.yml).
           git commit -m "$MSG"
           git push origin HEAD:${{ github.ref_name }}

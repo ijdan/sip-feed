@@ -1,5 +1,5 @@
 # language: fr
-# v2 — implémentation dans les fichiers de production (articles.py, collector, frontend)
+# v2 — implémentation production : articles.py, collector/main.py, AdminSettings.tsx
 Fonctionnalité: Filtrage des articles par ancienneté sans suppression
 
   Le paramètre "retention_days" contrôle la fenêtre temporelle des articles

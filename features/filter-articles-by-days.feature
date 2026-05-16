@@ -1,4 +1,5 @@
 # language: fr
+# Spécification v2 — filtre à la lecture, aucune suppression
 Fonctionnalité: Filtrage des articles par ancienneté sans suppression
 
   Le paramètre "retention_days" contrôle la fenêtre temporelle des articles

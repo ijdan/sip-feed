@@ -283,6 +283,30 @@ def get_latest_report(_: dict = Depends(require_admin)):
     return doc.to_dict()
 
 
+@router.get("/log-analysis")
+def get_log_analysis(_: dict = Depends(require_admin)):
+    from datetime import date as date_type
+    db = get_db()
+    doc = db.collection("log_analyses").document(date_type.today().isoformat()).get()
+    if not doc.exists:
+        raise HTTPException(status_code=404, detail="Rapport non disponible pour cette date.")
+    return doc.to_dict()
+
+
+@router.get("/log-analysis/{date_str}")
+def get_log_analysis_by_date(date_str: str, _: dict = Depends(require_admin)):
+    from datetime import date as date_type
+    try:
+        date_type.fromisoformat(date_str)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Format de date invalide (attendu : YYYY-MM-DD).")
+    db = get_db()
+    doc = db.collection("log_analyses").document(date_str).get()
+    if not doc.exists:
+        raise HTTPException(status_code=404, detail="Rapport non disponible pour cette date.")
+    return doc.to_dict()
+
+
 @router.get("/logs")
 def get_collector_logs(limit: int = Query(100, le=500), _: dict = Depends(require_admin)):
     try:

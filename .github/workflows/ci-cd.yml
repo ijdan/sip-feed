@@ -168,10 +168,18 @@ jobs:
         run: |
           docker build -t ${{ env.REGISTRY }}/collector:latest ./collector
           docker push ${{ env.REGISTRY }}/collector:latest
-      - name: Update Cloud Run Job
+      - name: Update Cloud Run Job — collector
         run: |
           gcloud run jobs update collector \
             --image=${{ env.REGISTRY }}/collector:latest \
+            --region=${{ env.GCP_REGION }} \
+            --project=${{ env.GCP_PROJECT }} \
+            --quiet
+      - name: Update Cloud Run Job — log-analyzer
+        run: |
+          gcloud run jobs update log-analyzer \
+            --image=${{ env.REGISTRY }}/collector:latest \
+            --args="python,analyze_logs.py" \
             --region=${{ env.GCP_REGION }} \
             --project=${{ env.GCP_PROJECT }} \
             --quiet

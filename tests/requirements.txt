@@ -1,0 +1,11 @@
+# Dépendances de test (venv séparé du backend prod).
+# Installées via `pip install -r tests/requirements.txt` ou via tests/run-tests.sh.
+
+# Suite backend existante
+pytest>=8.0
+httpx>=0.27
+PyJWT>=2.8
+python-dotenv>=1.0
+
+# Tests d'acceptance BDD (Gherkin → pytest)
+pytest-bdd>=7.0

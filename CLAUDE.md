@@ -54,7 +54,20 @@ cd frontend && npm run e2e           # lance les 5 scénarios E2E en headless
 cd frontend && npm run e2e:ui        # mode UI interactif (debug)
 ```
 
-Pré-requis : émulateur Firestore + backend + frontend démarrés (cf. `start-emulator.sh` + `start-local.sh`). Les tests sont dans `frontend/e2e/`, nommés `US-XXX-NNN — description` pour traçabilité avec les fichiers `Features/*.md`. Pas encore intégré à la CI (chantier à part : prévoir runner GitHub avec services démarrés ou émulateur en CI).
+Pré-requis : émulateur Firestore + backend + frontend démarrés (cf. `start-emulator.sh` + `start-local.sh`). Les tests sont dans `frontend/e2e/`, nommés `US-XXX-NNN — description` pour traçabilité avec les fichiers `docs/user-stories/*.md`. La CI exécute aussi ces tests via `.github/workflows/e2e.yml`.
+
+### Tests d'acceptance Gherkin (pytest-bdd)
+
+```bash
+pip install -r tests/requirements.txt          # installe pytest + pytest-bdd
+cd tests && pytest acceptance/ -v               # lance toutes les acceptance tests
+cd tests && pytest acceptance/test_hello.py -v  # un fichier
+```
+
+Organisation :
+- `features/*.feature` : scénarios Gherkin lisibles par l'humain (rédigés par toi, ou demain par Claude depuis un MCP/CLI).
+- `tests/acceptance/*.py` : step definitions pytest-bdd (générées par le **Workflow 1** de la pipeline d'automatisation, cf. ci-dessous).
+- `backend/app/features/` : code applicatif Python qui satisfait les scénarios (implémenté par le **Workflow 2**).
 
 ### Déploiement
 
@@ -93,6 +106,28 @@ Deux chemins selon `APP_ENV` :
 ### Règles Firestore (`infrastructure/firestore.rules`)
 
 Les `articles` sont **publics en lecture** (feed anonyme), mais toutes les écritures passent **exclusivement par le backend** (`allow write: if false` partout sauf `user_preferences`). Quand tu ajoutes une collection, pense à la règle correspondante.
+
+## Pipeline d'automatisation Claude (.feature → tests → code → PR)
+
+Trois workflows GitHub Actions s'enchaînent quand tu pousses un `.feature` Gherkin sur une branche `feature/**` :
+
+1. **`generate-acceptance-tests.yml`** (Sonnet 4.6) — lit les `.feature` modifiés, génère les step definitions pytest-bdd dans `tests/acceptance/`, commit avec `[skip ci]`.
+2. **`implement-feature.yml`** (Opus 4.7, max 15 turns) — implémente le code applicatif dans `backend/app/features/`, boucle test → fix → test jusqu'au vert ou épuisement du budget de turns, puis ouvre une **PR draft** vers `main`.
+3. **`ci-cd.yml`** (existant) — sur merge de la PR vers `main`, build + déploie sur Cloud Run.
+
+### Règles strictes pour le bot Claude dans la CI
+
+- **Tout commit fait par un workflow DOIT contenir `[skip ci]`** dans son message. C'est le filtre principal contre les boucles infinies.
+- **Jamais de push direct sur `main`**. Le bot ouvre toujours une PR en **draft** (`gh pr create --draft`). La validation reste humaine.
+- **Le bot ne modifie pas `main`** : il pousse sur la branche `feature/**` d'origine et y ouvre la PR.
+- **Workflow 2 a un cap de 15 turns** : si épuisé sans succès, la PR est créée quand même avec un label `needs-human-review`.
+
+### Convention de nommage
+
+- Branche : `feature/<slug-court>` (ex. `feature/article-tagging`).
+- Fichier Gherkin : `features/<slug-court>.feature`.
+- Step definitions : `tests/acceptance/test_<slug>.py`.
+- Code applicatif : `backend/app/features/<slug>/` (1 dossier par feature, contient les modules Python).
 
 ## Conventions implicites
 

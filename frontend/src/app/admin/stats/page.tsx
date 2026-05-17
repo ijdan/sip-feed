@@ -5,6 +5,7 @@ import { useEffect } from "react";
 import useSWR from "swr";
 
 const API = process.env.NEXT_PUBLIC_API_URL;
+const CATEGORIES = ["IA", "DevOps", "Cloud", "Sécurité", "Dev", "IT", "Autre"];
 
 export default function StatsPage() {
   const { data: session, status } = useSession();
@@ -22,6 +23,11 @@ export default function StatsPage() {
     () => fetch(`${API}/admin/stats`, { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json())
   );
 
+  const { data: articleStats, isLoading: isLoadingArticles } = useSWR(
+    role === "admin" ? "articles-stats" : null,
+    () => fetch(`${API}/articles/stats`).then(r => r.json())
+  );
+
   if (status === "loading" || isLoading) {
     return <p className="mt-20 text-center" style={{ color: "var(--text-muted)" }}>Chargement…</p>;
   }
@@ -36,6 +42,34 @@ export default function StatsPage() {
   return (
     <div className="space-y-8 pb-12">
       <h1 className="text-2xl font-bold" style={{ color: "var(--text)" }}>Statistiques</h1>
+
+      {/* Articles en base */}
+      <Section title="Articles en base">
+        {isLoadingArticles ? (
+          <p className="text-sm" style={{ color: "var(--text-muted)" }}>Chargement…</p>
+        ) : !articleStats ? (
+          <p className="text-sm" style={{ color: "var(--text-muted)" }}>Données indisponibles.</p>
+        ) : (
+          <div className="space-y-4">
+            <div>
+              <div className="text-4xl font-bold" style={{ color: "var(--accent)" }}>
+                {articleStats.total.toLocaleString("fr-FR")}
+              </div>
+              <p className="text-sm mt-1" style={{ color: "var(--text-muted)" }}>articles au total (toutes dates confondues)</p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {CATEGORIES.map((cat) => (
+                <span key={cat} className="text-sm px-3 py-1 rounded-full border"
+                  style={{ borderColor: "var(--border)", color: "var(--text)" }}>
+                  {cat} <span className="font-semibold" style={{ color: "var(--accent)" }}>
+                    {articleStats.by_category?.[cat] ?? 0}
+                  </span>
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+      </Section>
 
       {/* Utilisateurs */}
       <Section title="Utilisateurs enregistrés">

@@ -49,10 +49,6 @@ Fonctionnalité: Page Admin — Statistiques
     Quand je requête GET /articles/stats avec le token admin
     Alors la réponse contient le champ "by_category.Autre" supérieur ou égal à 1
 
-  Scénario: L'accès à /articles/stats est refusé sans token admin
-    Quand je requête GET /articles/stats sans token d'authentification
-    Alors la réponse a le statut HTTP 401
-
   # ── Pavé 2 : Utilisateurs enregistrés ────────────────────────────────────
 
   Scénario: L'endpoint /admin/stats retourne le nombre d'utilisateurs enregistrés

@@ -17,7 +17,7 @@ Ce dossier contient les workflows GitHub Actions de Sip-feed. Deux familles :
 ```
 ┌───────────────────────────────────────────────────────────────────────────┐
 │ Dev local                                                                 │
-│   └─ écrit features/<slug>.feature → git push origin feature/<slug>       │
+│   └─ écrit features/<slug>/<slug>.feature → git push origin feature/<slug> │
 └───────────────────────────────────┬───────────────────────────────────────┘
                                     ▼
 ┌───────────────────────────────────────────────────────────────────────────┐
@@ -68,7 +68,7 @@ Ce dossier contient les workflows GitHub Actions de Sip-feed. Deux familles :
 
 | Secret | Usage | Statut |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | Workflows 1 & 2 — appel Claude API | À créer |
+| `ANTHROPIC_API_KEY` | Workflows 1 & 2 — appel Claude API | Déjà en place |
 | `GCP_SA_KEY` | Workflow `ci-cd.yml` — déploiement Cloud Run | Déjà en place |
 
 #### Workflow permissions (Settings → Actions → General → Workflow permissions)

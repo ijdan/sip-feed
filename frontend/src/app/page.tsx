@@ -18,9 +18,9 @@ const COLUMN_CLASSES: Record<number, string> = {
 };
 
 export default function FeedPage() {
-  const { data: session, status: sessionStatus } = useSession();
+  const { data: session } = useSession();
   const token = ((session as unknown) as import("@/lib/types").AppSession)?.accessToken as string | undefined;
-  const { settings } = useSettings();
+  const { settings, loaded } = useSettings();
   const [columns, setColumns] = useState<number>(1);
   const [lang, setLang] = useState<"fr" | "en">("fr"); // session uniquement, ne persiste pas
   const [excludedSources, setExcludedSources] = useState<Set<string>>(new Set());
@@ -81,7 +81,10 @@ export default function FeedPage() {
 
 
   const apiBase = `${process.env.NEXT_PUBLIC_API_URL}/articles/`;
-  const pageSize = settings?.articles_per_page ?? 20;
+  // pageSize figé à la valeur localStorage du mount : évite de changer la clé SWR
+  // quand les settings distants arrivent (double fetch). Mis à jour via useSettings
+  // dès que l'utilisateur sauvegarde explicitement ses préférences.
+  const pageSize = settings.articles_per_page;
   const MAX_AUTO_PAGES = 10; // Borne défensive : max 10 pages auto-chargées par filtre
 
   // Y : nombre de "clics + 1" sur "Afficher plus" — la cible visible est pageSize × clicks
@@ -89,14 +92,17 @@ export default function FeedPage() {
 
   const { data, isLoading, size, setSize, isValidating } = useSWRInfinite(
     (index, prev) => {
-      // Attendre que la session soit déterminée pour éviter un double fetch
-      if (sessionStatus === "loading") return null;
+      // Attendre que les settings soient lus depuis localStorage (synchrone, < 1 ms)
+      // plutôt que d'attendre la session (réseau) — évite le double fetch au chargement.
+      if (!loaded) return null;
       // Stoppe la pagination quand la dernière page est vide
       if (prev && prev.items && prev.items.length === 0) return null;
-      return [`${apiBase}?page=${index + 1}&page_size=${pageSize}`, token ?? ""];
+      // Le token est exclu de la clé : les articles sont publics et non personnalisés
+      // côté serveur ; le token reste envoyé en header pour la compatibilité future.
+      return `${apiBase}?page=${index + 1}&page_size=${pageSize}`;
     },
-    ([url, t]: [string, string]) =>
-      fetch(url, t ? { headers: { Authorization: `Bearer ${t}` } } : {}).then(r => r.json()),
+    (url: string) =>
+      fetch(url, token ? { headers: { Authorization: `Bearer ${token}` } } : {}).then(r => r.json()),
     { revalidateOnFocus: false }
   );
 

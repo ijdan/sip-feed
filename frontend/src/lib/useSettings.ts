@@ -83,14 +83,17 @@ function loadLocal(): UserSettings {
 export function useSettings() {
   const { data: session } = useSession();
   const token = ((session as unknown) as import("@/lib/types").AppSession)?.accessToken as string | undefined;
-  const [settings, setSettings] = useState<UserSettings>(DEFAULTS);
-  const [loaded, setLoaded] = useState(false);
+  // Initialisation directe depuis localStorage : évite le render initial avec DEFAULTS
+  // suivi d'un re-render avec les vraies valeurs (et le changement de clé SWR que ça provoque).
+  const [settings, setSettings] = useState<UserSettings>(() => {
+    if (typeof window === "undefined") return DEFAULTS;
+    return loadLocal();
+  });
+  const [loaded, setLoaded] = useState(() => typeof window !== "undefined");
 
   useEffect(() => {
-    const local = loadLocal();
-    setSettings(local);
-    applyToDOM(local);
-    setLoaded(true);
+    // Applique les settings locaux au DOM dès le mount (déjà dans le state via useState)
+    applyToDOM(settings);
 
     if (token) {
       fetchSettings(token).then((remote) => {

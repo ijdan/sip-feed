@@ -1,4 +1,5 @@
 import logging
+import time
 logger = logging.getLogger(__name__)
 
 from datetime import datetime, timedelta, timezone
@@ -12,16 +13,25 @@ router = APIRouter()
 
 CATEGORIES = ["IA", "DevOps", "Cloud", "Sécurité", "Dev", "IT", "Autre"]
 
+_retention_cache: dict = {"value": 0, "expires": 0.0}
+_RETENTION_TTL = 300  # 5 minutes
+
 
 def _get_retention_days() -> int:
-    """Lit retention_days depuis settings/global (0 = illimité)."""
+    """Lit retention_days depuis settings/global, mis en cache 5 min."""
+    now = time.monotonic()
+    if now < _retention_cache["expires"]:
+        return _retention_cache["value"]
+    value = 0
     try:
         doc = get_db().collection("settings").document("global").get()
         if doc.exists:
-            return int(doc.to_dict().get("retention_days", 0) or 0)
+            value = int(doc.to_dict().get("retention_days", 0) or 0)
     except Exception as e:
         logger.warning(f"Impossible de lire retention_days : {e}")
-    return 0
+    _retention_cache["value"] = value
+    _retention_cache["expires"] = now + _RETENTION_TTL
+    return value
 
 
 def _est_dans_fenetre(data: dict, retention_days: int) -> bool:

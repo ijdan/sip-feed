@@ -83,6 +83,8 @@ def list_articles(
     source_id: str | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
+    excluded_ids: list[str] = Query(default=[]),
+    excluded_source_names: list[str] = Query(default=[]),
 ):
     db = get_db()
     query = db.collection("articles").order_by("published_at", direction="DESCENDING")
@@ -93,22 +95,33 @@ def list_articles(
         query = query.where("source_id", "==", source_id)
 
     retention_days = _get_retention_days()
+    excluded_ids_set = set(excluded_ids)
+    excluded_src_set = set(excluded_source_names)
+    needs_filter = bool(excluded_ids_set or excluded_src_set or retention_days > 0)
 
-    if retention_days <= 0:
-        # C1 : total via aggregation (pas de chargement en mémoire)
-        total = _count_query(query)
-        start = (page - 1) * page_size
+    total = _count_query(query)
+    start = (page - 1) * page_size
+
+    if not needs_filter:
         page_docs = list(query.offset(start).limit(page_size).stream())
         items = [Article(**{**doc.to_dict(), "id": doc.id}) for doc in page_docs]
     else:
-        # Filtrage par fenêtre de rétention en mémoire — Firestore ne permet pas
-        # un where("collected_at",...) combiné à order_by("published_at").
-        all_docs = list(query.stream())
-        kept = [doc for doc in all_docs if _est_dans_fenetre(doc.to_dict(), retention_days)]
-        total = len(kept)
-        start = (page - 1) * page_size
-        page_docs = kept[start:start + page_size]
-        items = [Article(**{**doc.to_dict(), "id": doc.id}) for doc in page_docs]
+        # Overfetch pour garantir page_size articles après filtrage.
+        # Le buffer couvre le nombre d'IDs à exclure + une marge de sécurité.
+        buffer = len(excluded_ids_set) + len(excluded_src_set) * 3 + page_size // 2
+        candidates = list(query.offset(start).limit(page_size + buffer).stream())
+        items = []
+        for doc in candidates:
+            if doc.id in excluded_ids_set:
+                continue
+            data = doc.to_dict()
+            if data.get("source_name") in excluded_src_set:
+                continue
+            if retention_days > 0 and not _est_dans_fenetre(data, retention_days):
+                continue
+            items.append(Article(**{**data, "id": doc.id}))
+            if len(items) >= page_size:
+                break
 
     return ArticleList(items=items, total=total, page=page, page_size=page_size)
 

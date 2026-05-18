@@ -92,17 +92,23 @@ export default function FeedPage() {
 
   const { data, isLoading, size, setSize, isValidating } = useSWRInfinite(
     (index, prev) => {
-      // Attendre que les settings soient lus depuis localStorage (synchrone, < 1 ms)
-      // plutôt que d'attendre la session (réseau) — évite le double fetch au chargement.
       if (!loaded) return null;
-      // Stoppe la pagination quand la dernière page est vide
       if (prev && prev.items && prev.items.length === 0) return null;
-      // Le token est exclu de la clé : les articles sont publics et non personnalisés
-      // côté serveur ; le token reste envoyé en header pour la compatibilité future.
+      // La clé SWR n'inclut pas les IDs dismissés ni les sources exclues :
+      // ils sont ajoutés dans le fetcher pour ne pas invalider tout le cache
+      // à chaque dismiss. Le backend les reçoit bien sur chaque fetch frais.
       return `${apiBase}?page=${index + 1}&page_size=${pageSize}`;
     },
-    (url: string) =>
-      fetch(url, token ? { headers: { Authorization: `Bearer ${token}` } } : {}).then(r => r.json()),
+    (url: string) => {
+      // IDs dismissés et sources exclues : filtrés côté backend pour que la
+      // réponse contienne directement les X bons articles, sans boucle auto-fetch.
+      const params = new URLSearchParams(url.split("?")[1]);
+      dismissedList.forEach(id => params.append("excluded_ids", id));
+      Array.from(excludedSources).forEach(s => params.append("excluded_source_names", s));
+      const fullUrl = `${url.split("?")[0]}?${params.toString()}`;
+      return fetch(fullUrl, token ? { headers: { Authorization: `Bearer ${token}` } } : {})
+        .then(r => r.json());
+    },
     { revalidateOnFocus: false }
   );
 
@@ -129,11 +135,13 @@ export default function FeedPage() {
     count: allItems.filter((a: any) => a.category === cat).length,
   }));
 
-  // Articles filtrés (tous ceux qui matchent les filtres parmi les déjà chargés)
+  // Articles filtrés côté client — uniquement les filtres sans équivalent backend.
+  // Les articles dismissés et les sources exclues sont déjà filtrés par le backend ;
+  // on les garde ici en filet de sécurité pour les réponses mises en cache (stale).
   const filteredItems = allItems.filter((a: any) => {
+    if (dismissedSet.has(a.id)) return false;
     if (excludedSources.has(a.source_name)) return false;
     if (selectedCategory !== null && a.category !== selectedCategory) return false;
-    if (dismissedSet.has(a.id)) return false;
     if (filterFavorites && !favorites.has(a.id)) return false;
     if (filterReading && !readingList.has(a.id)) return false;
     if (hideRead && readArticles.has(a.id)) return false;

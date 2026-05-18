@@ -33,6 +33,7 @@ export default function NewsCard({
 }: Props) {
   const [expanded, setExpanded] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
   const color = CATEGORY_COLORS[article.category] ?? CATEGORY_COLORS["Autre"];
 
   const { dragX, dragging, dismissed, swipingLeft, swipingRight, leftProgress, rightProgress, handlers } = useDragSwipe({
@@ -44,6 +45,15 @@ export default function NewsCard({
   const title = lang === "en" ? (article.title_en || article.title) : (article.title_fr || article.title);
   const shortDesc = lang === "en" ? (article.short_description_en || article.short_description) : (article.short_description_fr || article.short_description);
   const longDesc = lang === "en" ? (article.long_description_en || article.long_description) : (article.long_description_fr || article.long_description);
+
+  const handleCopy = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const text = [title, longDesc || shortDesc, article.article_url].filter(Boolean).join("\n----------\n");
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setMenuOpen(false);
+    setTimeout(() => setCopied(false), 2000);
+  };
 
   return (
     <div className="relative overflow-hidden rounded-lg">
@@ -92,6 +102,11 @@ export default function NewsCard({
       >
         {/* Bouton menu ⋯ */}
         <div className="absolute top-2 right-2 flex items-center gap-1">
+          {copied && (
+            <span className="text-xs font-medium px-2 py-1 rounded-full" style={{ color: "#22c55e", backgroundColor: "var(--surface-2)" }}>
+              {lang === "en" ? "Copied!" : "Copié !"}
+            </span>
+          )}
           {menuOpen && (
             <div
               className="flex items-center gap-3 px-4 py-2 rounded-full border shadow-sm"
@@ -101,6 +116,8 @@ export default function NewsCard({
                 className="text-lg transition hover:scale-125" style={{ opacity: isFavorite ? 1 : 0.3 }}>⭐</button>
               <button onClick={(e) => { e.stopPropagation(); onReadingList?.(); }} title="Liste de lecture"
                 className="text-lg transition hover:scale-125" style={{ opacity: isInReadingList ? 1 : 0.3 }}>👓</button>
+              <button onClick={handleCopy} title={lang === "en" ? "Copy" : "Copier"}
+                className="text-lg transition hover:scale-125">📋</button>
             </div>
           )}
           <button

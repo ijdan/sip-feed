@@ -61,6 +61,7 @@ export default function SynthesisPage() {
   };
 
   const [modalArticle, setModalArticle] = useState<any>(null);
+  const [modalCopied, setModalCopied] = useState(false);
   const modalRef = useRef<HTMLDivElement>(null);
   const lang = typeof window !== "undefined"
     ? (localStorage.getItem("feed-lang") as "fr" | "en" || "fr")
@@ -73,6 +74,20 @@ export default function SynthesisPage() {
     if (modalArticle) document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [modalArticle]);
+
+  useEffect(() => { setModalCopied(false); }, [modalArticle]);
+
+  const handleModalCopy = () => {
+    if (!modalArticle) return;
+    const title = lang === "en" ? (modalArticle.title_en || modalArticle.title_fr) : (modalArticle.title_fr || modalArticle.title_en);
+    const desc = lang === "en"
+      ? (modalArticle.long_description_en || modalArticle.short_description_en)
+      : (modalArticle.long_description_fr || modalArticle.short_description_fr);
+    const text = [title, desc, modalArticle.article_url].filter(Boolean).join("\n----------\n");
+    navigator.clipboard.writeText(text);
+    setModalCopied(true);
+    setTimeout(() => setModalCopied(false), 2000);
+  };
 
   if (status === "loading" || isLoading) {
     return <p className="mt-20 text-center" style={{ color: "var(--text-muted)" }}>Chargement…</p>;
@@ -194,9 +209,17 @@ export default function SynthesisPage() {
               <h3 className="font-semibold text-lg leading-snug" style={{ color: "var(--text)" }}>
                 {lang === "en" ? (modalArticle.title_en || modalArticle.title_fr) : (modalArticle.title_fr || modalArticle.title_en)}
               </h3>
-              <button onClick={() => setModalArticle(null)}
-                className="shrink-0 text-lg hover:opacity-60 transition"
-                style={{ color: "var(--text-muted)" }}>✕</button>
+              <div className="flex items-center gap-2 shrink-0">
+                {modalCopied
+                  ? <span className="text-xs font-medium" style={{ color: "#22c55e" }}>Copié !</span>
+                  : <button onClick={handleModalCopy} title="Copier"
+                      className="text-lg hover:opacity-60 transition"
+                      style={{ color: "var(--text-muted)" }}>📋</button>
+                }
+                <button onClick={() => setModalArticle(null)}
+                  className="text-lg hover:opacity-60 transition"
+                  style={{ color: "var(--text-muted)" }}>✕</button>
+              </div>
             </div>
             <p className="text-xs" style={{ color: "var(--text-muted)" }}>{modalArticle.source_name}</p>
             <p className="text-sm leading-relaxed" style={{ color: "var(--text)" }}>

@@ -119,6 +119,73 @@ def test_enrich_articles_batch_structure(monkeypatch):
         assert len(a["keywords_fr"]) > 0, "keywords_fr vide"
 
 
+def test_add_articles_no_cap_on_collection():
+    """Le collector doit tout récupérer — pas de limite arbitraire de collecte."""
+    all_raw: list[dict] = []
+    seen_urls: set[str] = set()
+
+    def already_exists_never(_url: str) -> bool:
+        return False
+
+    def _add_articles_to_batch(articles: list[dict]) -> None:
+        for raw in articles:
+            url = raw["article_url"]
+            if url in seen_urls or already_exists_never(url):
+                continue
+            seen_urls.add(url)
+            all_raw.append(raw)
+
+    # Gmail : 25 articles uniques
+    gmail_articles = [
+        {"title": f"Gmail article {i}", "article_url": f"https://gmail.example.com/{i}"}
+        for i in range(25)
+    ]
+    _add_articles_to_batch(gmail_articles)
+
+    # Web : 15 articles uniques supplémentaires
+    web_articles = [
+        {"title": f"Web article {i}", "article_url": f"https://web.example.com/{i}"}
+        for i in range(15)
+    ]
+    _add_articles_to_batch(web_articles)
+
+    assert len(all_raw) == 40, (
+        f"Toutes les sources doivent être collectées sans plafond, attendu 40, obtenu {len(all_raw)}"
+    )
+
+
+def test_add_articles_dedup_only():
+    """La déduplication par URL est le seul filtre — pas de limite de volume."""
+    all_raw: list[dict] = []
+    seen_urls: set[str] = set()
+    in_firestore = {"https://already.example.com/1", "https://already.example.com/2"}
+
+    def already_exists(url: str) -> bool:
+        return url in in_firestore
+
+    def _add_articles_to_batch(articles: list[dict]) -> None:
+        for raw in articles:
+            url = raw["article_url"]
+            if url in seen_urls or already_exists(url):
+                continue
+            seen_urls.add(url)
+            all_raw.append(raw)
+
+    articles = [
+        {"title": "Nouveau", "article_url": "https://new.example.com/1"},
+        {"title": "Déjà en base 1", "article_url": "https://already.example.com/1"},
+        {"title": "Déjà en base 2", "article_url": "https://already.example.com/2"},
+        {"title": "Nouveau 2", "article_url": "https://new.example.com/2"},
+        {"title": "Doublon run", "article_url": "https://new.example.com/1"},  # vu dans le run
+    ]
+    _add_articles_to_batch(articles)
+
+    assert len(all_raw) == 2, f"Seuls les 2 nouveaux doivent passer, obtenu {len(all_raw)}"
+    urls = [a["article_url"] for a in all_raw]
+    assert "https://new.example.com/1" in urls
+    assert "https://new.example.com/2" in urls
+
+
 def test_enrich_articles_category_injected_in_keywords(monkeypatch):
     """La catégorie doit être en tête des mots-clés."""
     from processors import gemini_processor

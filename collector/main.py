@@ -34,8 +34,6 @@ logging.getLogger().addHandler(_mem_handler)
 
 db = firestore.Client(project=os.environ.get("FIRESTORE_PROJECT_ID", "tech-news-aggregator-001"))
 
-MAX_ARTICLES_PER_RUN = 20
-
 
 DEFAULT_MODEL_PRIORITY = ["gemini-3-flash-preview", "gemini-2.5-flash", "gemini-3.1-flash-lite", "gemma-4-31b-it", "gemma-4-26b-a4b-it", "gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-2.0-flash-lite"]
 
@@ -104,8 +102,6 @@ def run():
     def _add_articles_to_batch(articles: list[dict]) -> None:
         """Ajoute les articles au batch avec déduplication et logging. Modifie all_raw et seen_urls."""
         for raw in articles:
-            if len(all_raw) >= MAX_ARTICLES_PER_RUN:
-                break
             url = raw["article_url"]
             if url in seen_urls or already_exists(url):
                 logger.info(f"  Déjà collecté, ignoré : {raw['title'][:TITLE_LOG_MAX_LENGTH]}")

@@ -38,6 +38,3 @@ class Article(BaseModel):
 
 class ArticleList(BaseModel):
     items: list[Article]
-    total: int
-    page: int
-    page_size: int

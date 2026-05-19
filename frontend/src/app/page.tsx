@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect } from "react";
-import useSWRInfinite from "swr/infinite";
+import useSWR from "swr";
 import { useSession } from "next-auth/react";
 import { usePreferences } from "@/lib/usePreferences";
 import { useSettings } from "@/lib/useSettings";
@@ -81,41 +81,20 @@ export default function FeedPage() {
 
 
   const apiBase = `${process.env.NEXT_PUBLIC_API_URL}/articles/`;
-  // pageSize figé à la valeur localStorage du mount : évite de changer la clé SWR
-  // quand les settings distants arrivent (double fetch). Mis à jour via useSettings
-  // dès que l'utilisateur sauvegarde explicitement ses préférences.
   const pageSize = settings.articles_per_page;
-  const MAX_AUTO_PAGES = 10; // Borne défensive : max 10 pages auto-chargées par filtre
 
   // Y : nombre de "clics + 1" sur "Afficher plus" — la cible visible est pageSize × clicks
   const [clicks, setClicks] = useState(1);
 
-  const { data, isLoading, size, setSize, isValidating } = useSWRInfinite(
-    (index, prev) => {
-      if (!loaded) return null;
-      if (prev && prev.items && prev.items.length === 0) return null;
-      // La clé SWR n'inclut pas les IDs dismissés ni les sources exclues :
-      // ils sont ajoutés dans le fetcher pour ne pas invalider tout le cache
-      // à chaque dismiss. Le backend les reçoit bien sur chaque fetch frais.
-      return `${apiBase}?page=${index + 1}&page_size=${pageSize}`;
-    },
-    (url: string) => {
-      // IDs dismissés et sources exclues : filtrés côté backend pour que la
-      // réponse contienne directement les X bons articles, sans boucle auto-fetch.
-      const params = new URLSearchParams(url.split("?")[1]);
-      dismissedList.forEach(id => params.append("excluded_ids", id));
-      Array.from(excludedSources).forEach(s => params.append("excluded_source_names", s));
-      const fullUrl = `${url.split("?")[0]}?${params.toString()}`;
-      return fetch(fullUrl, token ? { headers: { Authorization: `Bearer ${token}` } } : {})
-        .then(r => r.json());
-    },
+  const { data, isLoading } = useSWR<{ items: any[] }>(
+    loaded ? apiBase : null,
+    (url: string) => fetch(url, token ? { headers: { Authorization: `Bearer ${token}` } } : {})
+      .then(r => r.json()),
     { revalidateOnFocus: false }
   );
 
-  const allItems: any[] = (data ?? []).flatMap((d: any) => d?.items ?? []);
-  const totalAll = data?.[0]?.total ?? 0;
+  const allItems: any[] = data?.items ?? [];
   const targetVisible = pageSize * clicks;
-  const loadingMore = isValidating && !isLoading;
 
   // Sources uniques avec compteurs (sur les articles chargés)
   const sourceCountsAll: Record<string, number> = allItems.reduce(
@@ -155,35 +134,16 @@ export default function FeedPage() {
 
   // Articles réellement affichés : on slice à pageSize × clicks
   const visibleItems = filteredItems.slice(0, targetVisible);
+  const hasMore = filteredItems.length > visibleItems.length;
 
-  // "Afficher plus" est utile s'il reste des filteredItems non-affichés
-  // OU si le backend a encore des pages à charger
-  const hasMoreBackend = allItems.length < totalAll;
-  const hasMoreVisible = filteredItems.length > visibleItems.length;
-  const hasMore = hasMoreVisible || hasMoreBackend;
-
-  // Auto-fetch : tant qu'on n'a pas atteint la cible et que le backend a plus
-  useEffect(() => {
-    if (isValidating || isLoading) return;
-    if (filteredItems.length >= targetVisible) return;
-    if (!hasMoreBackend) return;
-    if (size >= MAX_AUTO_PAGES) return;
-    setSize(size + 1);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filteredItems.length, targetVisible, isValidating, isLoading, hasMoreBackend, size]);
-
-  // Reset clicks à 1 quand un filtre change (la US demande Y=1 sur changement de filtre).
-  // dismissedSet est volontairement exclu : dismisser un article est une action item-level,
-  // pas un filtre global → ne doit pas réinitialiser la pagination.
+  // Reset clicks à 1 quand un filtre change.
+  // dismissedSet est volontairement exclu : c'est une action item-level, pas un filtre global.
   useEffect(() => {
     setClicks(1);
   }, [excludedSources, selectedCategory, filterFavorites, filterReading, hideRead, searchTerms]);
 
-  // Reset clicks ET pages SWR quand pageSize change (la US demande Y=1 sur changement de X)
   useEffect(() => {
     setClicks(1);
-    setSize(1);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pageSize]);
 
   // Suggestions contextuelles : mots-clés des articles déjà filtrés
@@ -216,7 +176,7 @@ export default function FeedPage() {
             🗑️
           </button>
           <span>
-            {isLoading ? "…" : `${visibleItems.length} affiché${visibleItems.length > 1 ? "s" : ""} sur ${totalAll}`}
+            {isLoading ? "…" : `${visibleItems.length} affiché${visibleItems.length > 1 ? "s" : ""} sur ${filteredItems.length}`}
           </span>
         </div>
 
@@ -360,11 +320,9 @@ export default function FeedPage() {
         /* Vue feed normale */
         <>
           {isLoading && <p style={{ color: "var(--text-muted)" }}>Chargement…</p>}
-          {!isLoading && visibleItems.length === 0 && !loadingMore && (
+          {!isLoading && visibleItems.length === 0 && (
             <p className="text-sm" style={{ color: "var(--text-muted)" }}>
-              {hasMoreBackend && size >= MAX_AUTO_PAGES
-                ? "Pas plus de résultats correspondant à tes critères dans les pages parcourues."
-                : "Aucun article — ajuste les filtres ou réaffiche des sources."}
+              Aucun article — ajuste les filtres ou réaffiche des sources.
             </p>
           )}
           <div className={`grid gap-4 ${COLUMN_CLASSES[columns]}`}>
@@ -383,12 +341,7 @@ export default function FeedPage() {
               />
             ))}
           </div>
-          {loadingMore && (
-            <p className="text-center text-sm pt-4" style={{ color: "var(--text-muted)" }}>
-              Chargement…
-            </p>
-          )}
-          {hasMore && !loadingMore && (
+          {hasMore && (
             <div className="flex justify-center pt-4">
               <button
                 onClick={() => setClicks(c => c + 1)}

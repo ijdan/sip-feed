@@ -29,9 +29,6 @@ export interface Article {
 
 export interface ArticleList {
   items: Article[];
-  total: number;
-  page: number;
-  page_size: number;
 }
 
 /** Formate une date ISO en format long FR ou court selon le besoin. */

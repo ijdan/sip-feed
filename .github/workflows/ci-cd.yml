@@ -95,6 +95,9 @@ jobs:
   # ─── Deploy backend ────────────────────────────────────────────────────────
   deploy-backend:
     runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-backend
+      cancel-in-progress: false
     needs: [changes]
     if: (github.ref == 'refs/heads/main' && needs.changes.outputs.backend == 'true') || (github.event.pull_request.merged == true && needs.changes.outputs.backend == 'true') || github.event_name == 'workflow_dispatch'
     steps:
@@ -124,6 +127,9 @@ jobs:
   # ─── Deploy frontend ───────────────────────────────────────────────────────
   deploy-frontend:
     runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-frontend
+      cancel-in-progress: false
     needs: [changes, test-frontend]
     if: (github.ref == 'refs/heads/main' && needs.changes.outputs.frontend == 'true') || (github.event.pull_request.merged == true && needs.changes.outputs.frontend == 'true') || github.event_name == 'workflow_dispatch'
     steps:
@@ -156,6 +162,9 @@ jobs:
   # ─── Deploy collector ──────────────────────────────────────────────────────
   deploy-collector:
     runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-collector
+      cancel-in-progress: false
     needs: [changes, test-collector]
     if: (github.ref == 'refs/heads/main' && needs.changes.outputs.collector == 'true') || (github.event.pull_request.merged == true && needs.changes.outputs.collector == 'true') || github.event_name == 'workflow_dispatch'
     steps:

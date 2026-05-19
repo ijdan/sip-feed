@@ -22,12 +22,11 @@ def test_articles_list():
     assert r.status_code == 200
     data = r.json()
     assert "items" in data
-    assert "total" in data
-    assert data["total"] >= 0
+    assert isinstance(data["items"], list)
 
 
 def test_articles_list_has_bilingual_fields():
-    r = httpx.get(f"{BASE_URL}/articles/?page_size=5")
+    r = httpx.get(f"{BASE_URL}/articles/")
     assert r.status_code == 200
     items = r.json()["items"]
     if items:
@@ -37,7 +36,7 @@ def test_articles_list_has_bilingual_fields():
 
 
 def test_articles_list_keywords_are_lists():
-    r = httpx.get(f"{BASE_URL}/articles/?page_size=5")
+    r = httpx.get(f"{BASE_URL}/articles/")
     assert r.status_code == 200
     for a in r.json()["items"]:
         assert isinstance(a["keywords_fr"], list)
@@ -50,12 +49,6 @@ def test_articles_filter_by_category():
     items = r.json()["items"]
     for a in items:
         assert a["category"] == "IA", f"Catégorie inattendue : {a['category']}"
-
-
-def test_articles_pagination():
-    r = httpx.get(f"{BASE_URL}/articles/?page_size=3")
-    assert r.status_code == 200
-    assert len(r.json()["items"]) <= 3
 
 
 def test_articles_stats():

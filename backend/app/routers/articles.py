@@ -5,7 +5,6 @@ logger = logging.getLogger(__name__)
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, Query
-from google.cloud.firestore_v1.aggregation import AggregationQuery
 from app.db.firestore import get_db
 from app.models.article import Article, ArticleList
 
@@ -67,24 +66,10 @@ def articles_stats():
     return {"total": total, "by_category": counts}
 
 
-def _count_query(query) -> int:
-    """Compte les documents d'une requête Firestore via aggregation (sans les charger)."""
-    try:
-        result = query.count().get()
-        return result[0][0].value
-    except Exception:
-        # Fallback si count() non supporté (émulateur ancien)
-        return len(list(query.stream()))
-
-
 @router.get("/")
 def list_articles(
     category: str | None = Query(None),
     source_id: str | None = Query(None),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
-    excluded_ids: list[str] = Query(default=[]),
-    excluded_source_names: list[str] = Query(default=[]),
 ):
     db = get_db()
     query = db.collection("articles").order_by("published_at", direction="DESCENDING")
@@ -95,35 +80,14 @@ def list_articles(
         query = query.where("source_id", "==", source_id)
 
     retention_days = _get_retention_days()
-    excluded_ids_set = set(excluded_ids)
-    excluded_src_set = set(excluded_source_names)
-    needs_filter = bool(excluded_ids_set or excluded_src_set or retention_days > 0)
+    items = []
+    for doc in query.stream():
+        data = doc.to_dict()
+        if retention_days > 0 and not _est_dans_fenetre(data, retention_days):
+            continue
+        items.append(Article(**{**data, "id": doc.id}))
 
-    total = _count_query(query)
-    start = (page - 1) * page_size
-
-    if not needs_filter:
-        page_docs = list(query.offset(start).limit(page_size).stream())
-        items = [Article(**{**doc.to_dict(), "id": doc.id}) for doc in page_docs]
-    else:
-        # Overfetch pour garantir page_size articles après filtrage.
-        # Le buffer couvre le nombre d'IDs à exclure + une marge de sécurité.
-        buffer = len(excluded_ids_set) + len(excluded_src_set) * 3 + page_size // 2
-        candidates = list(query.offset(start).limit(page_size + buffer).stream())
-        items = []
-        for doc in candidates:
-            if doc.id in excluded_ids_set:
-                continue
-            data = doc.to_dict()
-            if data.get("source_name") in excluded_src_set:
-                continue
-            if retention_days > 0 and not _est_dans_fenetre(data, retention_days):
-                continue
-            items.append(Article(**{**data, "id": doc.id}))
-            if len(items) >= page_size:
-                break
-
-    return ArticleList(items=items, total=total, page=page, page_size=page_size)
+    return ArticleList(items=items)
 
 
 @router.get("/{article_id}", response_model=Article)

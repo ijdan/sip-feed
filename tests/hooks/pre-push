@@ -1,12 +1,77 @@
 #!/bin/bash
-# Hook pre-push — bloque le push si les tests fonctionnels échouent
+# Hook pre-push — (1) scan des secrets dans les commits à pousser,
+#                 (2) bloque si les tests fonctionnels échouent
 
 ROOT="$(git rev-parse --show-toplevel)"
+
+# Sauvegarder stdin avant toute lecture (les refs à pousser)
+PUSH_REFS=$(cat)
 
 echo ""
 echo "╔══════════════════════════════════════════╗"
 echo "║  🛡️  Vérification avant push             ║"
 echo "╚══════════════════════════════════════════╝"
+
+# ── 1. Scan des secrets dans les commits à pousser ───────────────────────────
+echo ""
+echo "  [1/2] Scan des secrets dans les commits entrants..."
+
+# Patterns critiques à vérifier (second filet de sécurité après pre-commit)
+SECRET_PATTERNS=(
+  "-----BEGIN (RSA|EC|DSA|OPENSSH|PGP) PRIVATE KEY"
+  "\"type\"[[:space:]]*:[[:space:]]*\"service_account\""
+  "AKIA[0-9A-Z]{16}"
+  "ya29\.[A-Za-z0-9_-]{20,}"
+  "AIza[A-Za-z0-9_-]{35}"
+  "GOCSPX-[A-Za-z0-9_-]{28}"
+  "gh[psour]_[A-Za-z0-9]{36,}"
+)
+
+# Construire la regex combinée
+COMBINED=$(printf '%s|' "${SECRET_PATTERNS[@]}")
+COMBINED="${COMBINED%|}"
+
+SECRETS_FOUND=0
+while IFS=' ' read -r local_ref local_sha remote_ref remote_sha; do
+  [ -z "$local_sha" ] && continue
+
+  # Calculer la plage de commits à pousser
+  if [ "$remote_sha" = "0000000000000000000000000000000000000000" ]; then
+    BASE=$(git merge-base origin/main "$local_sha" 2>/dev/null || echo "")
+    [ -n "$BASE" ] && RANGE="$BASE..$local_sha" || RANGE="$local_sha"
+  else
+    RANGE="$remote_sha..$local_sha"
+  fi
+
+  # Scanner les lignes ajoutées dans cette plage
+  ADDED=$(git diff "$RANGE" 2>/dev/null | grep "^+" | grep -v "^+++")
+  MATCH=$(echo "$ADDED" | grep -E "$COMBINED" 2>/dev/null)
+
+  if [ -n "$MATCH" ]; then
+    echo ""
+    echo "  ⚠  Secret détecté dans les commits à pousser ($local_ref) :"
+    echo "$MATCH" | head -5 | while IFS= read -r line; do
+      echo "     $(echo "$line" | cut -c1-100)"
+    done
+    SECRETS_FOUND=1
+  fi
+done <<< "$PUSH_REFS"
+
+if [ "$SECRETS_FOUND" -ne 0 ]; then
+  echo ""
+  echo "🚫 Push annulé — retire les secrets de l'historique git."
+  echo "   (git rebase -i, git filter-repo, ou BFG Repo Cleaner)"
+  echo "   Pour forcer malgré tout : git push --no-verify"
+  echo ""
+  exit 1
+fi
+
+echo "  Aucun secret détecté. ✓"
+
+# ── 2. Tests fonctionnels ─────────────────────────────────────────────────────
+echo ""
+echo "  [2/2] Exécution des tests..."
+echo ""
 
 bash "$ROOT/tests/run-tests.sh"
 EXIT_CODE=$?

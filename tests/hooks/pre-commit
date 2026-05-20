@@ -1,0 +1,83 @@
+#!/bin/bash
+# Hook pre-commit — détecte les secrets dans les fichiers stagés avant de committer
+
+ROOT="$(git rev-parse --show-toplevel)"
+FOUND=0
+
+echo ""
+echo "╔══════════════════════════════════════════╗"
+echo "║  🔍  Scan des secrets (pre-commit)       ║"
+echo "╚══════════════════════════════════════════╝"
+
+# Fichiers volontairement exclus du scan (placeholders, doc)
+SKIP_PATTERN="\.(example|sample|md|txt)$|tests/hooks/"
+
+# Chaque entrée : "Nom affiché|regex POSIX étendu"
+PATTERNS=(
+  "Clé privée (PEM)|-----BEGIN (RSA|EC|DSA|OPENSSH|PGP) PRIVATE KEY"
+  "Compte de service GCP|\"type\"[[:space:]]*:[[:space:]]*\"service_account\""
+  "Token GitHub|gh[psour]_[A-Za-z0-9]{36,}"
+  "Clé d'accès AWS|AKIA[0-9A-Z]{16}"
+  "Secret AWS|aws_secret_access_key[[:space:]]*=[[:space:]]*[A-Za-z0-9/+]{40}"
+  "Token OAuth Google|ya29\.[A-Za-z0-9_-]{20,}"
+  "Clé API Google/Gemini|AIza[A-Za-z0-9_-]{35}"
+  "Client Secret Google OAuth|GOCSPX-[A-Za-z0-9_-]{28}"
+  "JWT Secret (valeur réelle)|JWT_SECRET[[:space:]]*=[[:space:]]*['\"]?[A-Za-z0-9+/_-]{32,}"
+  "NEXTAUTH Secret (valeur réelle)|NEXTAUTH_SECRET[[:space:]]*=[[:space:]]*['\"]?[A-Za-z0-9+/_-]{32,}"
+  "Clé API générique (longue)|api[_-]?key[[:space:]]*=[[:space:]]*['\"]?[A-Za-z0-9_-]{40,}"
+)
+
+STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM)
+
+if [ -z "$STAGED_FILES" ]; then
+  echo "  Aucune modification stagée."
+  echo ""
+  exit 0
+fi
+
+while IFS= read -r file; do
+  # Ignorer les fichiers exclus (exemples, documentation, ce script lui-même)
+  if echo "$file" | grep -qE "$SKIP_PATTERN"; then
+    continue
+  fi
+
+  # Extraire uniquement les lignes ajoutées dans ce fichier
+  ADDED=$(git diff --cached -- "$file" 2>/dev/null \
+    | grep "^+" | grep -v "^+++" | sed 's/^+//')
+
+  [ -z "$ADDED" ] && continue
+
+  for entry in "${PATTERNS[@]}"; do
+    NAME="${entry%%|*}"
+    REGEX="${entry#*|}"
+
+    MATCH=$(echo "$ADDED" | grep -nE "$REGEX" 2>/dev/null)
+    if [ -n "$MATCH" ]; then
+      if [ "$FOUND" -eq 0 ]; then
+        echo ""
+        echo "  ⚠  SECRETS DÉTECTÉS — commit bloqué"
+        echo ""
+      fi
+      echo "  Fichier : $file"
+      echo "  Type    : $NAME"
+      echo "$MATCH" | head -3 | while IFS= read -r line; do
+        LINENO="${line%%:*}"
+        CONTENT=$(echo "${line#*:}" | cut -c1-80)
+        echo "  Ligne $LINENO : $CONTENT"
+      done
+      echo ""
+      FOUND=1
+    fi
+  done
+done <<< "$STAGED_FILES"
+
+if [ "$FOUND" -ne 0 ]; then
+  echo "🚫 Commit annulé. Retire les secrets avant de committer."
+  echo "   Faux positif confirmé ? Utilise : git commit --no-verify"
+  echo ""
+  exit 1
+fi
+
+echo "  Aucun secret détecté. ✓"
+echo ""
+exit 0

@@ -1,3 +1,5 @@
+import { signOut } from "next-auth/react";
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
 async function apiFetch(path: string, token: string, options: RequestInit = {}) {
@@ -9,6 +11,10 @@ async function apiFetch(path: string, token: string, options: RequestInit = {}) 
       ...options.headers,
     },
   });
+  if (res.status === 401) {
+    await signOut({ callbackUrl: "/" });
+    throw new Error("Session expirée");
+  }
   if (!res.ok) throw new Error(`API error ${res.status}`);
   if (res.status === 204) return null;
   return res.json();

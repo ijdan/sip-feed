@@ -37,9 +37,6 @@ def _check_emulator_reachable():
 
 router = APIRouter()
 
-GMAIL_SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
-GMAIL_TOKEN_STATUS_DOC = "gmail_token_status"
-
 CLOUD_RUN_JOB_URL = (
     f"https://europe-west1-run.googleapis.com/apis/run.googleapis.com/v1"
     f"/namespaces/{settings.firestore_project_id}/jobs/collector:run"
@@ -64,16 +61,6 @@ class GlobalSettings(BaseModel):
     gmail_lookback_days: int = 1
     retention_days: int = 0
     interest: str = ""
-
-
-def _load_gmail_token_json() -> str | None:
-    """Charge le JSON du token Gmail depuis l'env var ou le fichier local."""
-    token_json = os.environ.get("GMAIL_TOKEN")
-    if not token_json and IS_LOCAL:
-        token_file = COLLECTOR_DIR / "gmail_token.json"
-        if token_file.exists():
-            token_json = token_file.read_text()
-    return token_json
 
 
 def _get_access_token() -> str:
@@ -320,38 +307,6 @@ def get_log_analysis_by_date(date_str: str, _: dict = Depends(require_admin)):
     if not doc.exists:
         raise HTTPException(status_code=404, detail="Rapport non disponible pour cette date.")
     return doc.to_dict()
-
-
-@router.get("/gmail-token-status")
-def get_gmail_token_status(_: dict = Depends(require_admin)):
-    """Retourne le statut du token Gmail (lecture seule, cache Firestore + JSON du token)."""
-    import json as json_lib
-
-    token_json = _load_gmail_token_json()
-    if not token_json:
-        return {"configured": False, "status": "missing", "has_refresh_token": False}
-
-    try:
-        data = json_lib.loads(token_json)
-    except Exception:
-        return {"configured": True, "status": "invalid", "has_refresh_token": False}
-
-    has_refresh_token = bool(data.get("refresh_token"))
-    access_token_expiry = data.get("expiry")
-
-    db = get_db()
-    status_doc = db.collection("settings").document(GMAIL_TOKEN_STATUS_DOC).get()
-    cached = status_doc.to_dict() if status_doc.exists else {}
-
-    return {
-        "configured": True,
-        "status": "ok" if has_refresh_token else "invalid",
-        "has_refresh_token": has_refresh_token,
-        "access_token_expiry": access_token_expiry,
-        "last_checked": cached.get("last_checked"),
-        "last_check_success": cached.get("success"),
-        "last_error": cached.get("error"),
-    }
 
 
 @router.get("/logs")

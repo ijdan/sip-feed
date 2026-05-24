@@ -98,7 +98,6 @@ def run():
     # Étape 1 : collecte brute depuis toutes les sources
     all_raw: list[dict] = []
     seen_urls: set[str] = set()
-    gmail_status: dict | None = None  # None si aucune source Gmail dans ce run
 
     def _add_articles_to_batch(articles: list[dict]) -> None:
         """Ajoute les articles au batch avec déduplication et logging. Modifie all_raw et seen_urls."""
@@ -111,11 +110,6 @@ def run():
             all_raw.append(raw)
             logger.info(f"  Nouveau : {raw['title'][:TITLE_LOG_MAX_LENGTH]}")
 
-    def _set_gmail_error(source_name: str, exc: Exception) -> None:
-        nonlocal gmail_status
-        gmail_status = {"success": False, "error": f"{type(exc).__name__}: {exc}"}
-        logger.error(f"Erreur source Gmail «{source_name}» : {type(exc).__name__}: {exc}")
-
     for doc in sources:
         source = doc.to_dict()
         source["id"] = doc.id
@@ -126,29 +120,14 @@ def run():
                 _add_articles_to_batch(scrape_source(source))
             elif source["type"] == "gmail":
                 _add_articles_to_batch(read_gmail_source(source, lookback_days=gmail_lookback_days))
-                gmail_status = {"success": True, "error": None}
         except ConnectionError as e:
             logger.warning(f"Erreur réseau source {source['name']} — sera retenté au prochain run : {e}")
-            if source.get("type") == "gmail":
-                _set_gmail_error(source["name"], e)
         except TimeoutError as e:
             logger.warning(f"Timeout source {source['name']} — sera retenté au prochain run : {e}")
-            if source.get("type") == "gmail":
-                _set_gmail_error(source["name"], e)
         except ValueError as e:
             logger.error(f"Erreur parsing source {source['name']} (données corrompues ?) : {e}")
-            if source.get("type") == "gmail":
-                _set_gmail_error(source["name"], e)
         except Exception as e:
-            logger.error(f"Erreur inattendue source {source['name']} : {type(e).__name__}: {e}")
-            if source.get("type") == "gmail":
-                _set_gmail_error(source["name"], e)
-
-    if gmail_status is not None:
-        db.collection("settings").document("gmail_token_status").set({
-            "last_checked": datetime.utcnow().isoformat(),
-            **gmail_status,
-        })
+            logger.error(f"Erreur source {source['name']} : {type(e).__name__}: {e}")
 
     articles_collected = 0
 

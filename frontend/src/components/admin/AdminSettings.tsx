@@ -44,24 +44,10 @@ interface Settings {
   interest: string;
 }
 
-interface GmailTokenStatus {
-  configured: boolean;
-  status: "missing" | "invalid" | "ok";
-  has_refresh_token: boolean;
-  access_token_expiry?: string;
-  last_checked?: string;
-  last_check_success?: boolean;
-  last_error?: string;
-}
-
 export default function AdminSettings({ token }: { token: string }) {
   const { data: settings, isLoading } = useSWR<Settings>(
     "admin-settings",
     () => apiFetch("/admin/settings", token)
-  );
-  const { data: gmailStatus, mutate: mutateGmailStatus } = useSWR<GmailTokenStatus>(
-    "gmail-token-status",
-    () => apiFetch("/admin/gmail-token-status", token)
   );
 
   const [saving, setSaving] = useState(false);
@@ -199,11 +185,6 @@ export default function AdminSettings({ token }: { token: string }) {
         </div>
       </div>
 
-      <div className="border-t pt-4 space-y-3">
-        <p className="text-sm font-medium text-gray-700">Token Gmail</p>
-        <GmailTokenWidget status={gmailStatus} />
-      </div>
-
       <div className="border-t pt-4 flex items-center gap-3">
         <button
           onClick={launchCollect}
@@ -220,58 +201,6 @@ export default function AdminSettings({ token }: { token: string }) {
         )}
       </div>
 
-    </div>
-  );
-}
-
-function GmailTokenWidget({ status }: { status: GmailTokenStatus | undefined }) {
-  if (!status) return <p className="text-xs text-gray-400">Chargement du statut...</p>;
-
-  const badgeClass = {
-    missing: "bg-gray-100 text-gray-500",
-    invalid: "bg-red-100 text-red-700",
-    ok: status.last_check_success === false
-      ? "bg-orange-100 text-orange-700"
-      : "bg-green-100 text-green-700",
-  }[status.status];
-
-  const badgeLabel = {
-    missing: "Non configuré",
-    invalid: "Token invalide",
-    ok: status.last_check_success === false ? "Erreur lors de la dernière collecte" : "OK",
-  }[status.status];
-
-  const lastChecked = status.last_checked
-    ? new Date(status.last_checked).toLocaleString("fr-FR", {
-        day: "2-digit", month: "2-digit", year: "numeric",
-        hour: "2-digit", minute: "2-digit",
-      })
-    : null;
-
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center gap-3 flex-wrap">
-        <span className={`text-xs font-medium px-2 py-1 rounded-full ${badgeClass}`}>
-          {badgeLabel}
-        </span>
-        {lastChecked && (
-          <span className="text-xs text-gray-400">
-            Dernière collecte : {lastChecked}
-            {status.last_check_success === true && " ✓"}
-            {status.last_check_success === false && " ✗"}
-          </span>
-        )}
-      </div>
-      {status.last_check_success === false && status.last_error && (
-        <p className="text-xs text-red-600 bg-red-50 rounded p-2 leading-relaxed">
-          {status.last_error}
-          {status.last_error.includes("RefreshError") && (
-            <span className="block mt-1 font-medium">
-              Le refresh token est expiré ou révoqué — régénérez-le via <code>collector/auth_gmail.py</code> et mettez à jour le secret <code>GMAIL_TOKEN</code> dans Secret Manager.
-            </span>
-          )}
-        </p>
-      )}
     </div>
   );
 }

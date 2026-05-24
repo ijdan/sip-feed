@@ -1,8 +1,10 @@
 import os
 import re
 import base64
+import json
 from datetime import datetime
 from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request as GoogleRequest
 from googleapiclient.discovery import build
 
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
@@ -11,10 +13,27 @@ SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 def _get_gmail_service():
     token_json = os.environ.get("GMAIL_TOKEN")
     if token_json:
-        import json
         creds = Credentials.from_authorized_user_info(json.loads(token_json), SCOPES)
     else:
         creds = Credentials.from_authorized_user_file("gmail_token.json", SCOPES)
+
+    if not creds.valid:
+        if creds.expired and creds.refresh_token:
+            try:
+                creds.refresh(GoogleRequest())
+            except Exception as e:
+                raise RuntimeError(
+                    f"Renouvellement du token Gmail échoué : {e}. "
+                    "Le refresh token est probablement révoqué — "
+                    "régénérez-le via collector/auth_gmail.py et mettez à jour "
+                    "le secret GMAIL_TOKEN dans Secret Manager."
+                ) from e
+        elif not creds.refresh_token:
+            raise RuntimeError(
+                "Token Gmail invalide : refresh_token manquant. "
+                "Régénérez le token via collector/auth_gmail.py."
+            )
+
     return build("gmail", "v1", credentials=creds)
 
 

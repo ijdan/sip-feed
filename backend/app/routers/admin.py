@@ -76,22 +76,6 @@ def _load_gmail_token_json() -> str | None:
     return token_json
 
 
-def _save_gmail_token_prod(new_token_json: str) -> None:
-    """Ajoute une nouvelle version du secret GMAIL_TOKEN dans Secret Manager."""
-    import base64
-    secret_name = f"projects/{settings.firestore_project_id}/secrets/GMAIL_TOKEN"
-    token = _get_access_token()
-    encoded = base64.b64encode(new_token_json.encode()).decode()
-    resp = httpx.post(
-        f"https://secretmanager.googleapis.com/v1/{secret_name}/versions",
-        headers={"Authorization": f"Bearer {token}"},
-        json={"payload": {"data": encoded}},
-        timeout=15,
-    )
-    if resp.status_code not in (200, 201):
-        raise RuntimeError(f"Secret Manager {resp.status_code}: {resp.text}")
-
-
 def _get_access_token() -> str:
     creds, _ = google_auth_default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
     creds.refresh(GoogleRequest())
@@ -368,82 +352,6 @@ def get_gmail_token_status(_: dict = Depends(require_admin)):
         "last_check_success": cached.get("success"),
         "last_error": cached.get("error"),
     }
-
-
-@router.post("/gmail-token-refresh")
-def refresh_gmail_token(_: dict = Depends(require_admin)):
-    """Rafraîchit le token Gmail via l'API Google et met à jour le stockage (Secret Manager ou fichier local)."""
-    import json as json_lib
-    from datetime import datetime, timezone
-    from google.oauth2.credentials import Credentials
-    from google.auth.transport.requests import Request as GoogleRequest
-
-    token_json = _load_gmail_token_json()
-    if not token_json:
-        raise HTTPException(
-            status_code=404,
-            detail="Token Gmail non configuré — exécutez collector/auth_gmail.py pour le générer.",
-        )
-
-    try:
-        data = json_lib.loads(token_json)
-        creds = Credentials.from_authorized_user_info(data, GMAIL_SCOPES)
-    except Exception as e:
-        raise HTTPException(status_code=422, detail=f"Token malformé : {e}")
-
-    db = get_db()
-    now = datetime.now(timezone.utc).isoformat()
-
-    try:
-        creds.refresh(GoogleRequest())
-    except Exception as e:
-        db.collection("settings").document(GMAIL_TOKEN_STATUS_DOC).set({
-            "last_checked": now,
-            "success": False,
-            "error": str(e),
-        })
-        raise HTTPException(
-            status_code=502,
-            detail=(
-                f"Échec du rafraîchissement : {e}. "
-                "Le refresh token est probablement expiré ou révoqué. "
-                "Régénérez le token via collector/auth_gmail.py et mettez à jour GMAIL_TOKEN dans Secret Manager."
-            ),
-        )
-
-    new_token_json = creds.to_json()
-    new_expiry = json_lib.loads(new_token_json).get("expiry")
-
-    if IS_LOCAL:
-        token_file = COLLECTOR_DIR / "gmail_token.json"
-        token_file.write_text(new_token_json)
-        logger.info("Token Gmail rafraîchi — fichier local mis à jour.")
-    else:
-        try:
-            _save_gmail_token_prod(new_token_json)
-            logger.info("Token Gmail rafraîchi — Secret Manager mis à jour.")
-        except Exception as e:
-            logger.warning(f"Token rafraîchi mais Secret Manager non mis à jour : {e}")
-            db.collection("settings").document(GMAIL_TOKEN_STATUS_DOC).set({
-                "last_checked": now,
-                "success": False,
-                "error": f"Rafraîchi côté Google mais Secret Manager inaccessible : {e}",
-            })
-            raise HTTPException(
-                status_code=502,
-                detail=(
-                    "Token rafraîchi côté Google mais la mise à jour de Secret Manager a échoué. "
-                    "Vérifiez que le compte de service backend a le rôle roles/secretmanager.secretVersionAdder."
-                ),
-            )
-
-    db.collection("settings").document(GMAIL_TOKEN_STATUS_DOC).set({
-        "last_checked": now,
-        "success": True,
-        "error": None,
-        "last_expiry": new_expiry,
-    })
-    return {"success": True, "new_expiry": new_expiry}
 
 
 @router.get("/logs")

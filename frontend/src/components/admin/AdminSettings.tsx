@@ -67,24 +67,6 @@ export default function AdminSettings({ token }: { token: string }) {
   const [saving, setSaving] = useState(false);
   const [collecting, setCollecting] = useState(false);
   const [collectMsg, setCollectMsg] = useState("");
-  const [refreshingToken, setRefreshingToken] = useState(false);
-  const [refreshMsg, setRefreshMsg] = useState<{ text: string; ok: boolean } | null>(null);
-
-  const refreshGmailToken = async () => {
-    setRefreshingToken(true);
-    setRefreshMsg(null);
-    try {
-      await apiFetch("/admin/gmail-token-refresh", token, { method: "POST" });
-      setRefreshMsg({ text: "Token rafraîchi avec succès", ok: true });
-      mutateGmailStatus();
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Erreur inconnue";
-      setRefreshMsg({ text: msg, ok: false });
-    } finally {
-      setRefreshingToken(false);
-      setTimeout(() => setRefreshMsg(null), 8000);
-    }
-  };
 
   const launchCollect = async () => {
     setCollecting(true);
@@ -219,12 +201,7 @@ export default function AdminSettings({ token }: { token: string }) {
 
       <div className="border-t pt-4 space-y-3">
         <p className="text-sm font-medium text-gray-700">Token Gmail</p>
-        <GmailTokenWidget
-          status={gmailStatus}
-          refreshing={refreshingToken}
-          onRefresh={refreshGmailToken}
-          message={refreshMsg}
-        />
+        <GmailTokenWidget status={gmailStatus} />
       </div>
 
       <div className="border-t pt-4 flex items-center gap-3">
@@ -247,17 +224,7 @@ export default function AdminSettings({ token }: { token: string }) {
   );
 }
 
-function GmailTokenWidget({
-  status,
-  refreshing,
-  onRefresh,
-  message,
-}: {
-  status: GmailTokenStatus | undefined;
-  refreshing: boolean;
-  onRefresh: () => void;
-  message: { text: string; ok: boolean } | null;
-}) {
+function GmailTokenWidget({ status }: { status: GmailTokenStatus | undefined }) {
   if (!status) return <p className="text-xs text-gray-400">Chargement du statut...</p>;
 
   const badgeClass = {
@@ -271,7 +238,7 @@ function GmailTokenWidget({
   const badgeLabel = {
     missing: "Non configuré",
     invalid: "Token invalide",
-    ok: status.last_check_success === false ? "Erreur de rafraîchissement" : "Configuré",
+    ok: status.last_check_success === false ? "Erreur lors de la dernière collecte" : "OK",
   }[status.status];
 
   const lastChecked = status.last_checked
@@ -289,33 +256,20 @@ function GmailTokenWidget({
         </span>
         {lastChecked && (
           <span className="text-xs text-gray-400">
-            Dernière vérification : {lastChecked}
+            Dernière collecte : {lastChecked}
             {status.last_check_success === true && " ✓"}
             {status.last_check_success === false && " ✗"}
           </span>
         )}
-        <button
-          onClick={onRefresh}
-          disabled={refreshing || status.status === "missing"}
-          className="ml-auto px-3 py-1 rounded text-xs font-medium border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-40 transition"
-        >
-          {refreshing ? "Vérification…" : "Vérifier & Actualiser"}
-        </button>
       </div>
       {status.last_check_success === false && status.last_error && (
         <p className="text-xs text-red-600 bg-red-50 rounded p-2 leading-relaxed">
           {status.last_error}
-        </p>
-      )}
-      {message && (
-        <p
-          className="text-xs font-medium rounded p-2"
-          style={{
-            backgroundColor: message.ok ? "#f0fdf4" : "#fef2f2",
-            color: message.ok ? "#16a34a" : "#dc2626",
-          }}
-        >
-          {message.ok ? "✓ " : "✗ "}{message.text}
+          {status.last_error.includes("RefreshError") && (
+            <span className="block mt-1 font-medium">
+              Le refresh token est expiré ou révoqué — régénérez-le via <code>collector/auth_gmail.py</code> et mettez à jour le secret <code>GMAIL_TOKEN</code> dans Secret Manager.
+            </span>
+          )}
         </p>
       )}
     </div>

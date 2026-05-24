@@ -20,7 +20,14 @@ async function apiFetch(path: string, token: string, options: RequestInit = {}) 
     ...options,
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, ...options.headers },
   });
-  if (!res.ok) throw new Error(`API error ${res.status}`);
+  if (!res.ok) {
+    let detail = `Erreur ${res.status}`;
+    try {
+      const body = await res.json();
+      if (body?.detail) detail = body.detail;
+    } catch { /* ignore */ }
+    throw new Error(detail);
+  }
   if (res.status === 204) return null;
   return res.json();
 }
@@ -37,15 +44,47 @@ interface Settings {
   interest: string;
 }
 
+interface GmailTokenStatus {
+  configured: boolean;
+  status: "missing" | "invalid" | "ok";
+  has_refresh_token: boolean;
+  access_token_expiry?: string;
+  last_checked?: string;
+  last_check_success?: boolean;
+  last_error?: string;
+}
+
 export default function AdminSettings({ token }: { token: string }) {
   const { data: settings, isLoading } = useSWR<Settings>(
     "admin-settings",
     () => apiFetch("/admin/settings", token)
   );
+  const { data: gmailStatus, mutate: mutateGmailStatus } = useSWR<GmailTokenStatus>(
+    "gmail-token-status",
+    () => apiFetch("/admin/gmail-token-status", token)
+  );
 
   const [saving, setSaving] = useState(false);
   const [collecting, setCollecting] = useState(false);
   const [collectMsg, setCollectMsg] = useState("");
+  const [refreshingToken, setRefreshingToken] = useState(false);
+  const [refreshMsg, setRefreshMsg] = useState<{ text: string; ok: boolean } | null>(null);
+
+  const refreshGmailToken = async () => {
+    setRefreshingToken(true);
+    setRefreshMsg(null);
+    try {
+      await apiFetch("/admin/gmail-token-refresh", token, { method: "POST" });
+      setRefreshMsg({ text: "Token rafraîchi avec succès", ok: true });
+      mutateGmailStatus();
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Erreur inconnue";
+      setRefreshMsg({ text: msg, ok: false });
+    } finally {
+      setRefreshingToken(false);
+      setTimeout(() => setRefreshMsg(null), 8000);
+    }
+  };
 
   const launchCollect = async () => {
     setCollecting(true);
@@ -178,6 +217,16 @@ export default function AdminSettings({ token }: { token: string }) {
         </div>
       </div>
 
+      <div className="border-t pt-4 space-y-3">
+        <p className="text-sm font-medium text-gray-700">Token Gmail</p>
+        <GmailTokenWidget
+          status={gmailStatus}
+          refreshing={refreshingToken}
+          onRefresh={refreshGmailToken}
+          message={refreshMsg}
+        />
+      </div>
+
       <div className="border-t pt-4 flex items-center gap-3">
         <button
           onClick={launchCollect}
@@ -194,6 +243,81 @@ export default function AdminSettings({ token }: { token: string }) {
         )}
       </div>
 
+    </div>
+  );
+}
+
+function GmailTokenWidget({
+  status,
+  refreshing,
+  onRefresh,
+  message,
+}: {
+  status: GmailTokenStatus | undefined;
+  refreshing: boolean;
+  onRefresh: () => void;
+  message: { text: string; ok: boolean } | null;
+}) {
+  if (!status) return <p className="text-xs text-gray-400">Chargement du statut...</p>;
+
+  const badgeClass = {
+    missing: "bg-gray-100 text-gray-500",
+    invalid: "bg-red-100 text-red-700",
+    ok: status.last_check_success === false
+      ? "bg-orange-100 text-orange-700"
+      : "bg-green-100 text-green-700",
+  }[status.status];
+
+  const badgeLabel = {
+    missing: "Non configuré",
+    invalid: "Token invalide",
+    ok: status.last_check_success === false ? "Erreur de rafraîchissement" : "Configuré",
+  }[status.status];
+
+  const lastChecked = status.last_checked
+    ? new Date(status.last_checked).toLocaleString("fr-FR", {
+        day: "2-digit", month: "2-digit", year: "numeric",
+        hour: "2-digit", minute: "2-digit",
+      })
+    : null;
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-3 flex-wrap">
+        <span className={`text-xs font-medium px-2 py-1 rounded-full ${badgeClass}`}>
+          {badgeLabel}
+        </span>
+        {lastChecked && (
+          <span className="text-xs text-gray-400">
+            Dernière vérification : {lastChecked}
+            {status.last_check_success === true && " ✓"}
+            {status.last_check_success === false && " ✗"}
+          </span>
+        )}
+        <button
+          onClick={onRefresh}
+          disabled={refreshing || status.status === "missing"}
+          className="ml-auto px-3 py-1 rounded text-xs font-medium border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-40 transition"
+        >
+          {refreshing ? "Vérification…" : "Vérifier & Actualiser"}
+        </button>
+      </div>
+      {status.last_check_success === false && status.last_error && (
+        <p className="text-xs text-red-600 bg-red-50 rounded p-2 leading-relaxed">
+          {status.last_error}
+        </p>
+      )}
+      {message && (
+        <p
+          className="text-xs font-medium rounded p-2"
+          style={{
+            backgroundColor: message.ok ? "#f0fdf4" : "#fef2f2",
+            color: message.ok ? "#16a34a" : "#dc2626",
+          }}
+        >
+          {message.ok ? "✓ " : "✗ "}{message.text}
+        </p>
+      )}
     </div>
   );
 }

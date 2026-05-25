@@ -5,11 +5,14 @@ import { useSession } from "next-auth/react";
 import { usePreferences } from "@/lib/usePreferences";
 import { useSettings } from "@/lib/useSettings";
 import NewsCard from "@/components/NewsCard";
+import SummaryLayer from "@/components/SummaryLayer";
 import DropdownFilter, { FilterItem } from "@/components/DropdownFilter";
 import RadioFilter from "@/components/RadioFilter";
 import SearchBar from "@/components/SearchBar";
 import TrashCard from "@/components/TrashCard";
 import { CATEGORIES, categoryLabel } from "@/lib/categories";
+import { api } from "@/lib/api";
+import { ArticleSummary, AppSession } from "@/lib/types";
 
 const COLUMN_CLASSES: Record<number, string> = {
   1: "grid-cols-1",
@@ -19,7 +22,9 @@ const COLUMN_CLASSES: Record<number, string> = {
 
 export default function FeedPage() {
   const { data: session } = useSession();
-  const token = ((session as unknown) as import("@/lib/types").AppSession)?.accessToken as string | undefined;
+  const appSession = (session as unknown) as AppSession | undefined;
+  const token = appSession?.accessToken as string | undefined;
+  const isAdmin = appSession?.role === "admin";
   const { settings, loaded } = useSettings();
   const [columns, setColumns] = useState<number>(1);
   const [lang, setLang] = useState<"fr" | "en">("fr"); // session uniquement, ne persiste pas
@@ -36,6 +41,13 @@ export default function FeedPage() {
   const [hideRead, setHideRead] = useState(false);
   const [searchTerms, setSearchTerms] = useState<string[]>([]);
   const [searchOpen, setSearchOpen] = useState(false);
+
+  // État résumé
+  const [summaryData, setSummaryData] = useState<ArticleSummary | null>(null);
+  const [summaryArticleId, setSummaryArticleId] = useState<string | null>(null);
+  const [summaryOpen, setSummaryOpen] = useState(false);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summaryError, setSummaryError] = useState<string>("");
 
   useEffect(() => {
     const savedCols = localStorage.getItem("feed-columns");
@@ -63,6 +75,39 @@ export default function FeedPage() {
 
   const changeLang = (l: "fr" | "en") => {
     setLang(l); // session uniquement — ne modifie pas settings.default_lang
+  };
+
+  const handleSummarize = async (article: any) => {
+    if (!token) return;
+    // Résumé déjà en cache local → ouvrir directement
+    if (summaryData && summaryArticleId === article.id) {
+      setSummaryOpen(true);
+      return;
+    }
+    setSummaryLoading(true);
+    setSummaryError("");
+    setSummaryArticleId(article.id);
+    try {
+      const data: ArticleSummary = await api.articles.summarize(token, article.id);
+      setSummaryData(data);
+      setSummaryLoading(false);
+      setSummaryOpen(true);
+    } catch (err: any) {
+      setSummaryLoading(false);
+      const status = err.message?.match(/\d{3}/)?.[0];
+      const msg =
+        status === "503"
+          ? "Résumé indisponible — quota LLM dépassé. Réessayez plus tard."
+          : status === "504"
+          ? "L'article source n'a pas répondu dans les délais."
+          : status === "502"
+          ? "L'article source n'est pas accessible."
+          : status === "404"
+          ? "Article introuvable."
+          : "Erreur lors de la génération du résumé.";
+      setSummaryError(msg);
+      setTimeout(() => setSummaryError(""), 5000);
+    }
   };
 
   const toggleSource = (key: string) => {
@@ -156,6 +201,27 @@ export default function FeedPage() {
 
   return (
     <div className="space-y-4">
+      {/* Toast résumé — non-bloquant, fixe en bas */}
+      {(summaryLoading || summaryError) && (
+        <div
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 px-5 py-3 rounded-full shadow-lg text-sm font-medium"
+          style={{
+            backgroundColor: summaryError ? "#dc2626" : "var(--text)",
+            color: summaryError ? "#fff" : "var(--bg)",
+          }}
+        >
+          {summaryLoading ? "Génération du résumé en cours…" : summaryError}
+        </div>
+      )}
+
+      {/* Layer résumé */}
+      {summaryOpen && summaryData && (
+        <SummaryLayer
+          data={summaryData}
+          initialLang={lang}
+          onClose={() => setSummaryOpen(false)}
+        />
+      )}
 
       {/* Ligne 1 : compteur + undo + contrôles */}
       <div className="flex items-center justify-between gap-4 flex-wrap">
@@ -335,9 +401,11 @@ export default function FeedPage() {
                 onFavorite={() => toggleFavorite(article.id)}
                 onReadingList={() => toggleReadingList(article.id)}
                 onMarkRead={() => toggleRead(article.id)}
+                onSummarize={() => handleSummarize(article)}
                 isFavorite={favorites.has(article.id)}
                 isInReadingList={readingList.has(article.id)}
                 isRead={readArticles.has(article.id)}
+                isAdmin={isAdmin}
               />
             ))}
           </div>

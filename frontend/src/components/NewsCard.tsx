@@ -21,15 +21,17 @@ interface Props {
   onFavorite?: () => void;
   onReadingList?: () => void;
   onMarkRead?: () => void;
+  onSummarize?: () => void;
   isFavorite?: boolean;
   isInReadingList?: boolean;
   isRead?: boolean;
+  isAdmin?: boolean;
 }
 
 export default function NewsCard({
   article, lang = "fr",
-  onDismiss, onFavorite, onReadingList, onMarkRead,
-  isFavorite = false, isInReadingList = false, isRead = false,
+  onDismiss, onFavorite, onReadingList, onMarkRead, onSummarize,
+  isFavorite = false, isInReadingList = false, isRead = false, isAdmin = false,
 }: Props) {
   const [expanded, setExpanded] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -118,6 +120,15 @@ export default function NewsCard({
                 className="text-lg transition hover:scale-125" style={{ opacity: isInReadingList ? 1 : 0.3 }}>👓</button>
               <button onClick={handleCopy} title={lang === "en" ? "Copy" : "Copier"}
                 className="text-lg transition hover:scale-125">📋</button>
+              {isAdmin && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onSummarize?.(); }}
+                  title={lang === "en" ? "Summarize article" : "Résumer l'article"}
+                  className="text-lg transition hover:scale-125"
+                >
+                  📄
+                </button>
+              )}
             </div>
           )}
           <button

@@ -48,3 +48,15 @@ export interface Source {
   created_by: string;
   created_at: string;
 }
+
+export interface ArticleSummary {
+  article_id: string;
+  article_url: string;
+  summary_fr: string;
+  summary_en: string;
+  model_used: string;
+  generated_at: string;
+  word_count_fr: number;
+  word_count_en: number;
+  cached: boolean;
+}

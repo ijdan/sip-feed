@@ -1,12 +1,17 @@
+import asyncio
 import logging
 import time
 logger = logging.getLogger(__name__)
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
-from fastapi import APIRouter, HTTPException, Query
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Query
+from app.auth.google_oauth import require_admin
 from app.db.firestore import get_db
 from app.models.article import Article, ArticleList
+from app.models.summary import ArticleSummary
+from app.services.article_summarizer import fetch_article_text, generate_summary, get_model_priority
 
 router = APIRouter()
 
@@ -97,3 +102,80 @@ def get_article(article_id: str):
     if not doc.exists:
         raise HTTPException(status_code=404, detail="Article introuvable")
     return Article(**{**doc.to_dict(), "id": doc.id})
+
+
+@router.post("/{article_id}/summary", response_model=ArticleSummary, status_code=200)
+async def article_summary(
+    article_id: str,
+    current_user: dict = Depends(require_admin),
+):
+    """Génère (ou restitue depuis le cache) un résumé long-form de l'article source."""
+    db = get_db()
+
+    # Restitution depuis le cache Firestore
+    summary_ref = db.collection("article_summaries").document(article_id)
+    summary_doc = summary_ref.get()
+    if summary_doc.exists:
+        return ArticleSummary(**{**summary_doc.to_dict(), "cached": True})
+
+    # Récupération de l'article
+    article_doc = db.collection("articles").document(article_id).get()
+    if not article_doc.exists:
+        raise HTTPException(status_code=404, detail="Article introuvable")
+    article_url = article_doc.to_dict().get("article_url", "")
+
+    # Scraping de l'URL source
+    try:
+        text = await fetch_article_text(article_url)
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="L'article source n'a pas répondu dans les délais")
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"L'article source n'est pas accessible ({exc.response.status_code})",
+        )
+    except Exception as exc:
+        logger.error(f"Erreur scraping {article_url} : {exc}")
+        raise HTTPException(status_code=502, detail="L'article source n'est pas accessible")
+
+    # Génération via LLM avec cascade de fallback
+    model_priority = get_model_priority(db)
+    try:
+        summary_fr, summary_en, model_used = await generate_summary(text, model_priority)
+    except Exception as exc:
+        logger.error(f"Résumé LLM échoué pour {article_id} : {exc}")
+        raise HTTPException(status_code=503, detail="Résumé indisponible — quota LLM dépassé. Réessayez plus tard.")
+
+    # Persistance en base
+    now = datetime.now(timezone.utc).isoformat()
+    doc_data = {
+        "article_id": article_id,
+        "article_url": article_url,
+        "summary_fr": summary_fr,
+        "summary_en": summary_en,
+        "model_used": model_used,
+        "generated_at": now,
+        "word_count_fr": len(summary_fr.split()),
+        "word_count_en": len(summary_en.split()),
+    }
+    summary_ref.set(doc_data)
+
+    # Stats fire-and-forget
+    asyncio.create_task(_log_summary_stat(current_user.get("email", "admin")))
+
+    return ArticleSummary(**doc_data, cached=False)
+
+
+async def _log_summary_stat(identifier: str) -> None:
+    """Incrémente le compteur de résumés dans api_stats (non-bloquant)."""
+    try:
+        today = date.today().isoformat()
+        db = get_db()
+        ref = db.collection("api_stats").document(today)
+        doc = ref.get()
+        counts = doc.to_dict() if doc.exists else {}
+        key = f"summary:{identifier}"
+        counts[key] = counts.get(key, 0) + 1
+        ref.set(counts)
+    except Exception as exc:
+        logger.debug(f"Stats résumé ignorées : {exc}")

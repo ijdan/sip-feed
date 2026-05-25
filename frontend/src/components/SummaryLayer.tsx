@@ -12,9 +12,22 @@ export default function SummaryLayer({ data, initialLang, onClose }: Props) {
   const [lang, setLang] = useState<"fr" | "en">(initialLang);
   const [copiedText, setCopiedText] = useState(false);
   const [copiedUrl, setCopiedUrl] = useState(false);
+  const [htmlContent, setHtmlContent] = useState("");
 
   const summary = lang === "en" ? data.summary_en : data.summary_fr;
   const wordCount = lang === "en" ? data.word_count_en : data.word_count_fr;
+
+  // Rendu markdown → HTML sécurisé (browser uniquement)
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { marked } = await import("marked");
+      const { default: DOMPurify } = await import("dompurify");
+      const raw = await marked.parse(summary);
+      if (!cancelled) setHtmlContent(DOMPurify.sanitize(raw));
+    })();
+    return () => { cancelled = true; };
+  }, [summary]);
 
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
@@ -125,14 +138,13 @@ export default function SummaryLayer({ data, initialLang, onClose }: Props) {
           </div>
         </div>
 
-        {/* Contenu */}
+        {/* Contenu markdown */}
         <div className="overflow-y-auto px-6 py-5 flex-1">
-          <p
-            className="text-sm leading-relaxed"
-            style={{ color: "var(--text)", whiteSpace: "pre-wrap" }}
-          >
-            {summary}
-          </p>
+          <div
+            className="text-sm leading-relaxed summary-md"
+            style={{ color: "var(--text)" }}
+            dangerouslySetInnerHTML={{ __html: htmlContent || summary }}
+          />
         </div>
 
         {/* Footer */}

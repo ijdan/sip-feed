@@ -78,8 +78,23 @@ async def fetch_article_text(url: str) -> str:
     return "\n".join(lines)[:50_000]
 
 
+from typing import Callable
+
+
 def _sync_call_llm(text: str, models_to_try: list[str]) -> tuple[str, str, str]:
     """Cascade LLM synchrone. Retourne (summary_fr, summary_en, model_used)."""
+    return _sync_call_llm_with_progress(text, models_to_try, send_progress=None)
+
+
+def _sync_call_llm_with_progress(
+    text: str,
+    models_to_try: list[str],
+    send_progress: Callable[[str], None] | None,
+) -> tuple[str, str, str]:
+    """Cascade LLM synchrone avec callbacks de progression.
+
+    send_progress est appelé depuis le thread — utiliser call_soon_threadsafe côté appelant.
+    """
     genai.configure(api_key=os.environ["GEMINI_API_KEY"])
     prompt = SUMMARY_PROMPT.format(text=text)
     generation_config = {
@@ -88,7 +103,12 @@ def _sync_call_llm(text: str, models_to_try: list[str]) -> tuple[str, str, str]:
         "response_mime_type": "application/json",
     }
     last_error: Exception | None = None
-    for model_name in models_to_try:
+    for i, model_name in enumerate(models_to_try):
+        if send_progress:
+            if i == 0:
+                send_progress(f"Génération du résumé LLM en cours ({model_name})…")
+            else:
+                send_progress(f"Modèle précédent indisponible — essai avec {model_name}…")
         try:
             logger.debug(f"Résumé — essai modèle : {model_name}")
             m = genai.GenerativeModel(model_name, generation_config=generation_config)
@@ -108,7 +128,7 @@ def _sync_call_llm(text: str, models_to_try: list[str]) -> tuple[str, str, str]:
 
 
 async def generate_summary(text: str, models_to_try: list[str]) -> tuple[str, str, str]:
-    """Wrapper async pour la cascade LLM (exécuté dans un thread pool)."""
+    """Wrapper async pour la cascade LLM sans progression (exécuté dans un thread pool)."""
     return await asyncio.to_thread(_sync_call_llm, text, models_to_try)
 
 

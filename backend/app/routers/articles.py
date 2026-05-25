@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import time
 logger = logging.getLogger(__name__)
@@ -7,11 +8,15 @@ from datetime import date, datetime, timedelta, timezone
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from app.auth.google_oauth import require_admin
 from app.db.firestore import get_db
 from app.models.article import Article, ArticleList
-from app.models.summary import ArticleSummary
-from app.services.article_summarizer import fetch_article_text, generate_summary, get_model_priority
+from app.services.article_summarizer import (
+    fetch_article_text,
+    get_model_priority,
+    _sync_call_llm_with_progress,
+)
 
 router = APIRouter()
 
@@ -104,49 +109,95 @@ def get_article(article_id: str):
     return Article(**{**doc.to_dict(), "id": doc.id})
 
 
-@router.post("/{article_id}/summary", response_model=ArticleSummary, status_code=200)
+@router.post("/{article_id}/summary")
 async def article_summary(
     article_id: str,
     current_user: dict = Depends(require_admin),
 ):
-    """Génère (ou restitue depuis le cache) un résumé long-form de l'article source."""
+    """Génère (ou restitue) un résumé long-form en streaming SSE.
+
+    Événements émis :
+      {"type": "progress", "message": "..."}  — étape en cours
+      {"type": "result",   "data": {...}}      — résumé prêt
+      {"type": "error",    "message": "...", "status": N}
+    """
+    identifier = current_user.get("email", "admin")
+    return StreamingResponse(
+        _summary_event_stream(article_id, identifier),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+async def _summary_event_stream(article_id: str, identifier: str):
+    """Générateur async SSE pour la génération de résumé."""
+
+    def sse(event_type: str, **kwargs) -> str:
+        return f"data: {json.dumps({'type': event_type, **kwargs})}\n\n"
+
     db = get_db()
 
-    # Restitution depuis le cache Firestore
+    # ── Cache Firestore ────────────────────────────────────────────────────────
+    yield sse("progress", message="Recherche en base…")
     summary_ref = db.collection("article_summaries").document(article_id)
     summary_doc = summary_ref.get()
     if summary_doc.exists:
-        return ArticleSummary(**{**summary_doc.to_dict(), "cached": True})
+        yield sse("progress", message="Résumé trouvé en base — restitution immédiate.")
+        yield sse("result", data={**summary_doc.to_dict(), "cached": True})
+        return
 
-    # Récupération de l'article
+    # ── Récupération de l'article ──────────────────────────────────────────────
     article_doc = db.collection("articles").document(article_id).get()
     if not article_doc.exists:
-        raise HTTPException(status_code=404, detail="Article introuvable")
+        yield sse("error", message="Article introuvable", status=404)
+        return
     article_url = article_doc.to_dict().get("article_url", "")
 
-    # Scraping de l'URL source
+    # ── Scraping ───────────────────────────────────────────────────────────────
+    yield sse("progress", message="Extraction de l'article source en cours…")
     try:
         text = await fetch_article_text(article_url)
     except httpx.TimeoutException:
-        raise HTTPException(status_code=504, detail="L'article source n'a pas répondu dans les délais")
+        yield sse("error", message="L'article source n'a pas répondu dans les délais.", status=504)
+        return
     except httpx.HTTPStatusError as exc:
-        raise HTTPException(
-            status_code=502,
-            detail=f"L'article source n'est pas accessible ({exc.response.status_code})",
-        )
+        yield sse("error", message=f"L'article source n'est pas accessible ({exc.response.status_code}).", status=502)
+        return
     except Exception as exc:
         logger.error(f"Erreur scraping {article_url} : {exc}")
-        raise HTTPException(status_code=502, detail="L'article source n'est pas accessible")
+        yield sse("error", message="L'article source n'est pas accessible.", status=502)
+        return
 
-    # Génération via LLM avec cascade de fallback
+    # ── LLM avec progression ───────────────────────────────────────────────────
     model_priority = get_model_priority(db)
+    loop = asyncio.get_running_loop()
+    progress_queue: asyncio.Queue = asyncio.Queue()
+
+    def send_progress(msg: str) -> None:
+        loop.call_soon_threadsafe(progress_queue.put_nowait, msg)
+
+    llm_task = asyncio.create_task(
+        asyncio.to_thread(_sync_call_llm_with_progress, text, model_priority, send_progress)
+    )
+
+    # Drain la queue de progression pendant que le thread tourne
+    while not llm_task.done():
+        await asyncio.sleep(0.15)
+        while not progress_queue.empty():
+            yield sse("progress", message=progress_queue.get_nowait())
+
+    # Vider les messages restants émis juste avant la fin du thread
+    while not progress_queue.empty():
+        yield sse("progress", message=progress_queue.get_nowait())
+
     try:
-        summary_fr, summary_en, model_used = await generate_summary(text, model_priority)
+        summary_fr, summary_en, model_used = llm_task.result()
     except Exception as exc:
         logger.error(f"Résumé LLM échoué pour {article_id} : {exc}")
-        raise HTTPException(status_code=503, detail="Résumé indisponible — quota LLM dépassé. Réessayez plus tard.")
+        yield sse("error", message="Résumé indisponible — quota LLM dépassé. Réessayez plus tard.", status=503)
+        return
 
-    # Persistance en base
+    # ── Persistance ────────────────────────────────────────────────────────────
     now = datetime.now(timezone.utc).isoformat()
     doc_data = {
         "article_id": article_id,
@@ -161,9 +212,9 @@ async def article_summary(
     summary_ref.set(doc_data)
 
     # Stats fire-and-forget
-    asyncio.create_task(_log_summary_stat(current_user.get("email", "admin")))
+    asyncio.create_task(_log_summary_stat(identifier))
 
-    return ArticleSummary(**doc_data, cached=False)
+    yield sse("result", data={**doc_data, "cached": False})
 
 
 async def _log_summary_stat(identifier: str) -> None:

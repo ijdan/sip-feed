@@ -11,7 +11,6 @@ import RadioFilter from "@/components/RadioFilter";
 import SearchBar from "@/components/SearchBar";
 import TrashCard from "@/components/TrashCard";
 import { CATEGORIES, categoryLabel } from "@/lib/categories";
-import { api } from "@/lib/api";
 import { ArticleSummary, AppSession } from "@/lib/types";
 
 const COLUMN_CLASSES: Record<number, string> = {
@@ -47,6 +46,7 @@ export default function FeedPage() {
   const [summaryArticleId, setSummaryArticleId] = useState<string | null>(null);
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summaryProgressMsg, setSummaryProgressMsg] = useState<string>("");
   const [summaryError, setSummaryError] = useState<string>("");
 
   useEffect(() => {
@@ -85,15 +85,44 @@ export default function FeedPage() {
       return;
     }
     setSummaryLoading(true);
+    setSummaryProgressMsg("Initialisation…");
     setSummaryError("");
     setSummaryArticleId(article.id);
     try {
-      const data: ArticleSummary = await api.articles.summarize(token, article.id);
-      setSummaryData(data);
-      setSummaryLoading(false);
-      setSummaryOpen(true);
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL}/articles/${article.id}/summary`,
+        { method: "POST", headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (!res.ok || !res.body) {
+        throw new Error(`API error ${res.status}`);
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop() ?? "";
+        for (const part of parts) {
+          if (!part.startsWith("data: ")) continue;
+          const event = JSON.parse(part.slice(6));
+          if (event.type === "progress") {
+            setSummaryProgressMsg(event.message);
+          } else if (event.type === "result") {
+            setSummaryData(event.data);
+            setSummaryLoading(false);
+            setSummaryProgressMsg("");
+            setSummaryOpen(true);
+          } else if (event.type === "error") {
+            throw new Error(`API error ${event.status ?? 500}: ${event.message}`);
+          }
+        }
+      }
     } catch (err: any) {
       setSummaryLoading(false);
+      setSummaryProgressMsg("");
       const status = err.message?.match(/\d{3}/)?.[0];
       const msg =
         status === "503"
@@ -204,13 +233,19 @@ export default function FeedPage() {
       {/* Toast résumé — non-bloquant, fixe en bas */}
       {(summaryLoading || summaryError) && (
         <div
-          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 px-5 py-3 rounded-full shadow-lg text-sm font-medium"
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 px-5 py-3 rounded-full shadow-lg text-sm font-medium flex items-center gap-2"
           style={{
             backgroundColor: summaryError ? "#dc2626" : "var(--text)",
             color: summaryError ? "#fff" : "var(--bg)",
+            maxWidth: "calc(100vw - 3rem)",
           }}
         >
-          {summaryLoading ? "Génération du résumé en cours…" : summaryError}
+          {summaryLoading && (
+            <span className="shrink-0 animate-spin">⟳</span>
+          )}
+          <span className="truncate">
+            {summaryLoading ? summaryProgressMsg : summaryError}
+          </span>
         </div>
       )}
 

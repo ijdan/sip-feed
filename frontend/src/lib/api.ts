@@ -37,8 +37,6 @@ export const api = {
     },
     get: (token: string, id: string) => apiFetch(`/articles/${id}`, token),
     stats: () => publicFetch("/articles/stats"),
-    summarize: (token: string, id: string) =>
-      apiFetch(`/articles/${id}/summary`, token, { method: "POST" }),
   },
   sources: {
     list: (token: string) => apiFetch("/sources/", token),

@@ -160,14 +160,28 @@ export default function FeedPage() {
   // Y : nombre de "clics + 1" sur "Afficher plus" — la cible visible est pageSize × clicks
   const [clicks, setClicks] = useState(1);
 
+  const fetcher = (url: string) =>
+    fetch(url, token ? { headers: { Authorization: `Bearer ${token}` } } : {}).then(r => r.json());
+
   const { data, isLoading } = useSWR<{ items: any[] }>(
     loaded ? apiBase : null,
-    (url: string) => fetch(url, token ? { headers: { Authorization: `Bearer ${token}` } } : {})
-      .then(r => r.json()),
+    fetcher,
+    { revalidateOnFocus: false }
+  );
+
+  // Appel dédié pour les favoris — sans restriction de rétention
+  const favIds = filterFavorites && favorites.size > 0
+    ? Array.from(favorites).join(",")
+    : null;
+  const { data: favData, isLoading: favLoading } = useSWR<{ items: any[] }>(
+    favIds ? `${apiBase}?ids=${favIds}` : null,
+    fetcher,
     { revalidateOnFocus: false }
   );
 
   const allItems: any[] = data?.items ?? [];
+  const baseItems: any[] = filterFavorites ? (favData?.items ?? []) : allItems;
+  const effectiveLoading = filterFavorites ? favLoading : isLoading;
   const targetVisible = pageSize * clicks;
 
   // Sources uniques avec compteurs (sur les articles chargés)
@@ -191,7 +205,7 @@ export default function FeedPage() {
   // Articles filtrés côté client — uniquement les filtres sans équivalent backend.
   // Les articles dismissés et les sources exclues sont déjà filtrés par le backend ;
   // on les garde ici en filet de sécurité pour les réponses mises en cache (stale).
-  const filteredItems = allItems.filter((a: any) => {
+  const filteredItems = baseItems.filter((a: any) => {
     if (dismissedSet.has(a.id)) return false;
     if (excludedSources.has(a.source_name)) return false;
     if (selectedCategory !== null && a.category !== selectedCategory) return false;
@@ -420,8 +434,8 @@ export default function FeedPage() {
       ) : (
         /* Vue feed normale */
         <>
-          {isLoading && <p style={{ color: "var(--text-muted)" }}>Chargement…</p>}
-          {!isLoading && visibleItems.length === 0 && (
+          {effectiveLoading && <p style={{ color: "var(--text-muted)" }}>Chargement…</p>}
+          {!effectiveLoading && visibleItems.length === 0 && (
             <p className="text-sm" style={{ color: "var(--text-muted)" }}>
               Aucun article — ajuste les filtres ou réaffiche des sources.
             </p>

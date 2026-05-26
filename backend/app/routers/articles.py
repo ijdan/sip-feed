@@ -80,8 +80,22 @@ def articles_stats():
 def list_articles(
     category: str | None = Query(None),
     source_id: str | None = Query(None),
+    ids: str | None = Query(None),
 ):
     db = get_db()
+
+    # Récupération par IDs explicites — sans filtre de rétention (favoris anciens)
+    if ids:
+        id_list = [i.strip() for i in ids.split(",") if i.strip()][:200]
+        items = []
+        for article_id in id_list:
+            doc = db.collection("articles").document(article_id).get()
+            if doc.exists:
+                data = doc.to_dict()
+                items.append(Article(**{**data, "id": doc.id}))
+        items.sort(key=lambda a: a.published_at or "", reverse=True)
+        return ArticleList(items=items)
+
     query = db.collection("articles").order_by("published_at", direction="DESCENDING")
 
     if category:

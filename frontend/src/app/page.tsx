@@ -32,7 +32,7 @@ export default function FeedPage() {
   const {
     favorites, readingList, readArticles,
     dismissedList, dismissedSet,
-    toggleFavorite, toggleReadingList, toggleRead, dismiss, restoreArticle,
+    toggleFavorite, addFavorite, toggleReadingList, toggleRead, dismiss, restoreArticle,
   } = usePreferences();
   const [trashOpen, setTrashOpen] = useState(false);
   const [filterFavorites, setFilterFavorites] = useState(false);
@@ -115,6 +115,7 @@ export default function FeedPage() {
             setSummaryLoading(false);
             setSummaryProgressMsg("");
             setSummaryOpen(true);
+            addFavorite(article.id);
           } else if (event.type === "error") {
             throw new Error(`API error ${event.status ?? 500}: ${event.message}`);
           }

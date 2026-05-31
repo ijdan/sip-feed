@@ -123,6 +123,14 @@ export function usePreferences() {
     persist(next, state.current.readingList, state.current.readArticles, state.current.dismissedList);
   }, [persist]);
 
+  const addFavorite = useCallback((id: string) => {
+    if (state.current.favorites.has(id)) return;
+    const next = new Set(state.current.favorites);
+    next.add(id);
+    setFavorites(next);
+    persist(next, state.current.readingList, state.current.readArticles, state.current.dismissedList);
+  }, [persist]);
+
   const toggleReadingList = useCallback((id: string) => {
     const next = new Set(state.current.readingList);
     next.has(id) ? next.delete(id) : next.add(id);
@@ -163,7 +171,7 @@ export function usePreferences() {
   return {
     favorites, readingList, readArticles,
     dismissedList, dismissedSet: new Set(dismissedList),
-    toggleFavorite, toggleReadingList, toggleRead, dismiss, undoDismiss, restoreArticle,
+    toggleFavorite, addFavorite, toggleReadingList, toggleRead, dismiss, undoDismiss, restoreArticle,
     loaded,
   };
 }

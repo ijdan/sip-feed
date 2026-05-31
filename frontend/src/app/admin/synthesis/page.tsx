@@ -4,6 +4,9 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState, useRef } from "react";
 import useSWR from "swr";
 import { markdownToHtml } from "@/lib/markdownToHtml";
+import SummaryLayer from "@/components/SummaryLayer";
+import { usePreferences } from "@/lib/usePreferences";
+import { ArticleSummary } from "@/lib/types";
 
 const API = process.env.NEXT_PUBLIC_API_URL;
 
@@ -60,12 +63,77 @@ export default function SynthesisPage() {
     }
   };
 
+  const { addFavorite } = usePreferences();
+
   const [modalArticle, setModalArticle] = useState<any>(null);
   const [modalCopied, setModalCopied] = useState(false);
   const modalRef = useRef<HTMLDivElement>(null);
   const lang = typeof window !== "undefined"
     ? (localStorage.getItem("feed-lang") as "fr" | "en" || "fr")
     : "fr";
+
+  const [summaryData, setSummaryData] = useState<ArticleSummary | null>(null);
+  const [summaryArticleId, setSummaryArticleId] = useState<string | null>(null);
+  const [summaryOpen, setSummaryOpen] = useState(false);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summaryProgressMsg, setSummaryProgressMsg] = useState("");
+  const [summaryError, setSummaryError] = useState("");
+
+  const handleSummarize = async (article: any) => {
+    if (!token) return;
+    if (summaryData && summaryArticleId === article.id) {
+      setSummaryOpen(true);
+      return;
+    }
+    setSummaryLoading(true);
+    setSummaryProgressMsg("Initialisation…");
+    setSummaryError("");
+    setSummaryArticleId(article.id);
+    try {
+      const res = await fetch(
+        `${API}/articles/${article.id}/summary`,
+        { method: "POST", headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (!res.ok || !res.body) throw new Error(`API error ${res.status}`);
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop() ?? "";
+        for (const part of parts) {
+          if (!part.startsWith("data: ")) continue;
+          const event = JSON.parse(part.slice(6));
+          if (event.type === "progress") {
+            setSummaryProgressMsg(event.message);
+          } else if (event.type === "result") {
+            setSummaryData(event.data);
+            setSummaryLoading(false);
+            setSummaryProgressMsg("");
+            setSummaryOpen(true);
+            addFavorite(article.id);
+          } else if (event.type === "error") {
+            throw new Error(`API error ${event.status ?? 500}: ${event.message}`);
+          }
+        }
+      }
+    } catch (err: any) {
+      setSummaryLoading(false);
+      setSummaryProgressMsg("");
+      const status = err.message?.match(/\d{3}/)?.[0];
+      const msg =
+        status === "503" ? "Résumé indisponible — quota LLM dépassé. Réessayez plus tard."
+        : status === "504" ? "L'article source n'a pas répondu dans les délais."
+        : status === "502" ? "L'article source n'est pas accessible."
+        : status === "404" ? "Article introuvable."
+        : "Erreur lors de la génération du résumé.";
+      setSummaryError(msg);
+      setTimeout(() => setSummaryError(""), 5000);
+    }
+  };
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -97,6 +165,29 @@ export default function SynthesisPage() {
 
   return (
     <div className="space-y-6 pb-12">
+      {/* Toast résumé */}
+      {(summaryLoading || summaryError) && (
+        <div
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 px-5 py-3 rounded-full shadow-lg text-sm font-medium flex items-center gap-2"
+          style={{
+            backgroundColor: summaryError ? "#dc2626" : "var(--text)",
+            color: summaryError ? "#fff" : "var(--bg)",
+            maxWidth: "calc(100vw - 3rem)",
+          }}
+        >
+          {summaryLoading && <span className="shrink-0 animate-spin">⟳</span>}
+          <span className="truncate">{summaryLoading ? summaryProgressMsg : summaryError}</span>
+        </div>
+      )}
+
+      {/* Layer résumé */}
+      {summaryOpen && summaryData && (
+        <SummaryLayer
+          data={summaryData}
+          initialLang={lang}
+          onClose={() => setSummaryOpen(false)}
+        />
+      )}
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold" style={{ color: "var(--text)" }}>Synthèse</h1>
         <button onClick={() => mutate()}
@@ -227,11 +318,20 @@ export default function SynthesisPage() {
                 ? (modalArticle.long_description_en || modalArticle.short_description_en)
                 : (modalArticle.long_description_fr || modalArticle.short_description_fr)}
             </p>
-            <a href={modalArticle.article_url} target="_blank" rel="noopener noreferrer"
-              className="inline-block px-4 py-2 rounded text-sm font-medium transition hover:opacity-80"
-              style={{ backgroundColor: "var(--text)", color: "var(--bg)" }}>
-              {lang === "en" ? "Read article →" : "Lire l'article →"}
-            </a>
+            <div className="flex items-center gap-3 flex-wrap">
+              <button
+                onClick={() => { const a = modalArticle; setModalArticle(null); handleSummarize(a); }}
+                disabled={summaryLoading}
+                className="px-4 py-2 rounded text-sm font-medium transition hover:opacity-80 disabled:opacity-50"
+                style={{ backgroundColor: "var(--accent)", color: "#fff" }}>
+                {summaryLoading && summaryArticleId === modalArticle.id ? "…" : "✨ Résumé IA"}
+              </button>
+              <a href={modalArticle.article_url} target="_blank" rel="noopener noreferrer"
+                className="inline-block px-4 py-2 rounded text-sm font-medium transition hover:opacity-80"
+                style={{ backgroundColor: "var(--text)", color: "var(--bg)" }}>
+                {lang === "en" ? "Read article →" : "Lire l'article →"}
+              </a>
+            </div>
           </div>
         </div>
       )}

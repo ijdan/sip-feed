@@ -20,22 +20,28 @@ DEFAULT_MODEL_PRIORITY = [
     "gemini-2.0-flash-lite",
 ]
 
-SUMMARY_PROMPT = """\
-En tant que journaliste logiciel expert, résume l'article ci-dessous en 2000 mots.
+PROMPT_VERSION = "linkedin-v1"
 
-Règles :
-- Sois factuel, cite les technologies, entreprises et chiffres clés
-- Structure le résumé avec des sections claires
+SUMMARY_PROMPT = """\
+En tant que rédacteur LinkedIn expert, rédige un post LinkedIn percutant basé sur l'article ci-dessous.
+
+Règles impératives :
+- 150 à 220 mots au maximum — concis et percutant
+- Commence par une accroche forte (1-2 phrases) qui donne envie de lire la suite
+- Développe 2-3 idées clés tirées de l'article, en texte courant (sans listes ni puces)
+- Termine par une observation ou une question engageante
+- Zéro caractère de formatage markdown : pas de #, **, *, _, >, ni de tirets de liste
+- Texte brut uniquement, des paragraphes séparés par une ligne vide
+- Garde les noms propres, technologies et chiffres clés de l'article
 - N'invente aucun fait absent du texte source
-- Conserve les noms propres et acronymes techniques en version originale
 
 Réponds UNIQUEMENT avec un objet JSON strict :
 {{
-  "summary_fr": "résumé complet en français (~2000 mots)",
-  "summary_en": "complete summary in English (~2000 words)"
+  "summary_fr": "post LinkedIn en français (150-220 mots, texte brut)",
+  "summary_en": "LinkedIn post in English (150-220 words, plain text)"
 }}
 
-Article à résumer :
+Article :
 ---
 {text}
 ---
@@ -98,8 +104,8 @@ def _sync_call_llm_with_progress(
     genai.configure(api_key=os.environ["GEMINI_API_KEY"])
     prompt = SUMMARY_PROMPT.format(text=text)
     generation_config = {
-        "temperature": 0.4,
-        "max_output_tokens": 8192,
+        "temperature": 0.7,
+        "max_output_tokens": 1024,
         "response_mime_type": "application/json",
     }
     last_error: Exception | None = None

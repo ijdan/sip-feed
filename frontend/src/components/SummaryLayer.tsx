@@ -38,7 +38,7 @@ export default function SummaryLayer({ data, initialLang, onClose }: Props) {
   }, [onClose]);
 
   const handleCopyText = () => {
-    navigator.clipboard.writeText(summary);
+    navigator.clipboard.writeText(`${summary}\n\n${data.article_url}`);
     setCopiedText(true);
     setTimeout(() => setCopiedText(false), 2000);
   };
@@ -67,7 +67,7 @@ export default function SummaryLayer({ data, initialLang, onClose }: Props) {
           style={{ borderColor: "var(--border)" }}
         >
           <span className="text-sm font-medium" style={{ color: "var(--text-muted)" }}>
-            {lang === "en" ? `Summary · ${wordCount} words` : `Résumé · ${wordCount} mots`}
+            {lang === "en" ? `LinkedIn post · ${wordCount} words` : `Post LinkedIn · ${wordCount} mots`}
             {data.cached && (
               <span
                 className="ml-2 text-xs px-1.5 py-0.5 rounded"
@@ -99,7 +99,7 @@ export default function SummaryLayer({ data, initialLang, onClose }: Props) {
 
             <button
               onClick={handleCopyText}
-              title={lang === "en" ? "Copy text" : "Copier le texte"}
+              title={lang === "en" ? "Copy post + URL" : "Copier le post + URL"}
               className="px-3 py-1 text-sm rounded-md border transition"
               style={{
                 borderColor: "var(--border)",

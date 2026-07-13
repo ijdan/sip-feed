@@ -123,7 +123,7 @@ export default function NewsCard({
               {isAdmin && (
                 <button
                   onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onSummarize?.(); }}
-                  title={lang === "en" ? "Summarize article" : "Résumer l'article"}
+                  title={lang === "en" ? "Generate LinkedIn post" : "Générer un post LinkedIn"}
                   className="text-lg transition hover:scale-125"
                 >
                   📄

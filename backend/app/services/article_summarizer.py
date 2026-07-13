@@ -20,25 +20,35 @@ DEFAULT_MODEL_PRIORITY = [
     "gemini-2.0-flash-lite",
 ]
 
-PROMPT_VERSION = "linkedin-v1"
+PROMPT_VERSION = "linkedin-v2"
 
 SUMMARY_PROMPT = """\
-En tant que rédacteur LinkedIn expert, rédige un post LinkedIn percutant basé sur l'article ci-dessous.
+En tant que journaliste expert en technologie, rédige un post LinkedIn basé sur l'article ci-dessous.
 
-Règles impératives :
-- 150 à 220 mots au maximum — concis et percutant
-- Commence par une accroche forte (1-2 phrases) qui donne envie de lire la suite
-- Développe 2-3 idées clés tirées de l'article, en texte courant (sans listes ni puces)
-- Termine par une observation ou une question engageante
-- Zéro caractère de formatage markdown : pas de #, **, *, _, >, ni de tirets de liste
-- Texte brut uniquement, des paragraphes séparés par une ligne vide
-- Garde les noms propres, technologies et chiffres clés de l'article
+Contexte de l'article :
+- Titre : {title}
+- Source : {source}
+
+Ton rôle : tu as lu cet article et tu partages avec ton réseau ce que tu en as retenu. \
+Positionne-toi en expert qui explique, contextualise et met en avant les points clés — pas en simple résumeur.
+
+Structure impérative du post (dans cet ordre) :
+1. Contexte (1-2 lignes) : indique le titre de l'article, l'auteur s'il est mentionné dans le texte, et la source. Situe le lecteur dès l'ouverture.
+2. Accroche (1-2 lignes) : une observation forte qui donne envie de lire la suite.
+3. Corps (3-4 paragraphes) : explique ce que tu as compris, pourquoi c'est intéressant, les idées clés dans tes propres mots de journaliste.
+4. Section "À retenir :" : 3 à 4 points clés sous forme de tirets simples (- Point).
+
+Règles de format :
+- 300 à 400 mots au total
+- Texte brut uniquement : aucun #, **, *, _ ni > — seuls les tirets (-) de la section "À retenir" sont autorisés
+- Paragraphes séparés par une ligne vide
+- Conserve les noms propres, technologies et chiffres clés de l'article
 - N'invente aucun fait absent du texte source
 
 Réponds UNIQUEMENT avec un objet JSON strict :
 {{
-  "summary_fr": "post LinkedIn en français (150-220 mots, texte brut)",
-  "summary_en": "LinkedIn post in English (150-220 words, plain text)"
+  "summary_fr": "post LinkedIn en français (300-400 mots, texte brut)",
+  "summary_en": "LinkedIn post in English (300-400 words, plain text)"
 }}
 
 Article :
@@ -96,16 +106,22 @@ def _sync_call_llm_with_progress(
     text: str,
     models_to_try: list[str],
     send_progress: Callable[[str], None] | None,
+    article_meta: dict | None = None,
 ) -> tuple[str, str, str]:
     """Cascade LLM synchrone avec callbacks de progression.
 
     send_progress est appelé depuis le thread — utiliser call_soon_threadsafe côté appelant.
     """
     genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-    prompt = SUMMARY_PROMPT.format(text=text)
+    meta = article_meta or {}
+    prompt = SUMMARY_PROMPT.format(
+        title=meta.get("title") or "Non renseigné",
+        source=meta.get("source") or "Non renseignée",
+        text=text,
+    )
     generation_config = {
         "temperature": 0.7,
-        "max_output_tokens": 1024,
+        "max_output_tokens": 2048,
         "response_mime_type": "application/json",
     }
     last_error: Exception | None = None

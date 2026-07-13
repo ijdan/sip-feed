@@ -169,7 +169,12 @@ async def _summary_event_stream(article_id: str, identifier: str):
     if not article_doc.exists:
         yield sse("error", message="Article introuvable", status=404)
         return
-    article_url = article_doc.to_dict().get("article_url", "")
+    article_data = article_doc.to_dict()
+    article_url = article_data.get("article_url", "")
+    article_meta = {
+        "title": article_data.get("title_fr") or article_data.get("title", ""),
+        "source": article_data.get("source_name", ""),
+    }
 
     # ── Scraping ───────────────────────────────────────────────────────────────
     yield sse("progress", message="Extraction de l'article source en cours…")
@@ -195,7 +200,7 @@ async def _summary_event_stream(article_id: str, identifier: str):
         loop.call_soon_threadsafe(progress_queue.put_nowait, msg)
 
     llm_task = asyncio.create_task(
-        asyncio.to_thread(_sync_call_llm_with_progress, text, model_priority, send_progress)
+        asyncio.to_thread(_sync_call_llm_with_progress, text, model_priority, send_progress, article_meta)
     )
 
     # Drain la queue de progression pendant que le thread tourne

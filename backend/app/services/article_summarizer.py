@@ -20,25 +20,42 @@ DEFAULT_MODEL_PRIORITY = [
     "gemini-2.0-flash-lite",
 ]
 
-PROMPT_VERSION = "linkedin-v1"
+PROMPT_VERSION = "linkedin-v3"
 
 SUMMARY_PROMPT = """\
-En tant que rédacteur LinkedIn expert, rédige un post LinkedIn percutant basé sur l'article ci-dessous.
+En tant que journaliste expert en technologie avec une plume narrative, rédige un post LinkedIn mémorable \
+basé sur l'article ci-dessous.
 
-Règles impératives :
-- 150 à 220 mots au maximum — concis et percutant
-- Commence par une accroche forte (1-2 phrases) qui donne envie de lire la suite
-- Développe 2-3 idées clés tirées de l'article, en texte courant (sans listes ni puces)
-- Termine par une observation ou une question engageante
-- Zéro caractère de formatage markdown : pas de #, **, *, _, >, ni de tirets de liste
-- Texte brut uniquement, des paragraphes séparés par une ligne vide
-- Garde les noms propres, technologies et chiffres clés de l'article
+Contexte de l'article :
+- Titre : {title}
+- Source : {source}
+
+Ton style : tu combines la narration journalistique (arc temporel, protagonistes nommés, contexte avant/après) \
+avec un regard contrarian — tu identifies ce que l'article révèle que le consensus habituel occulte ou \
+que la majorité n'a pas encore vu. Tu peux utiliser la première personne avec parcimonie pour apporter \
+ta voix ("ce qui me frappe ici", "je ne m'attendais pas à", "ce que peu ont relevé").
+
+Structure impérative du post (dans cet ordre) :
+1. Mise en scène (2-3 lignes) : situe l'article dans son contexte narratif — qui sont les acteurs, \
+quelle décision ou tendance est en jeu, depuis quand. Mentionne le titre, l'auteur s'il est nommé dans \
+le texte, et la source.
+2. Retournement (1-2 lignes) : identifie ce que cet article révèle de surprenant, de contre-intuitif \
+ou de sous-estimé par rapport au discours dominant — c'est la phrase qui accroche et qui fait lire la suite.
+3. Développement (3-4 paragraphes) : déroule les idées clés avec la voix d'un analyste qui a compris \
+plus loin que le titre — contexte réel, enjeux, nuances, ce que ça change concrètement.
+4. Section "À retenir :" : 3 à 4 points clés sous forme de tirets simples (- Point).
+
+Règles de format :
+- 300 à 400 mots au total
+- Texte brut uniquement : aucun #, **, *, _ ni > — seuls les tirets (-) de la section "À retenir" sont autorisés
+- Paragraphes séparés par une ligne vide
+- Conserve les noms propres, entreprises, technologies et chiffres clés de l'article
 - N'invente aucun fait absent du texte source
 
 Réponds UNIQUEMENT avec un objet JSON strict :
 {{
-  "summary_fr": "post LinkedIn en français (150-220 mots, texte brut)",
-  "summary_en": "LinkedIn post in English (150-220 words, plain text)"
+  "summary_fr": "post LinkedIn en français (300-400 mots, texte brut)",
+  "summary_en": "LinkedIn post in English (300-400 words, plain text)"
 }}
 
 Article :
@@ -96,16 +113,22 @@ def _sync_call_llm_with_progress(
     text: str,
     models_to_try: list[str],
     send_progress: Callable[[str], None] | None,
+    article_meta: dict | None = None,
 ) -> tuple[str, str, str]:
     """Cascade LLM synchrone avec callbacks de progression.
 
     send_progress est appelé depuis le thread — utiliser call_soon_threadsafe côté appelant.
     """
     genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-    prompt = SUMMARY_PROMPT.format(text=text)
+    meta = article_meta or {}
+    prompt = SUMMARY_PROMPT.format(
+        title=meta.get("title") or "Non renseigné",
+        source=meta.get("source") or "Non renseignée",
+        text=text,
+    )
     generation_config = {
         "temperature": 0.7,
-        "max_output_tokens": 1024,
+        "max_output_tokens": 2048,
         "response_mime_type": "application/json",
     }
     last_error: Exception | None = None

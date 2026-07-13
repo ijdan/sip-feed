@@ -16,6 +16,7 @@ from app.services.article_summarizer import (
     fetch_article_text,
     get_model_priority,
     _sync_call_llm_with_progress,
+    PROMPT_VERSION,
 )
 
 router = APIRouter()
@@ -156,9 +157,12 @@ async def _summary_event_stream(article_id: str, identifier: str):
     summary_ref = db.collection("article_summaries").document(article_id)
     summary_doc = summary_ref.get()
     if summary_doc.exists:
-        yield sse("progress", message="Résumé trouvé en base — restitution immédiate.")
-        yield sse("result", data={**summary_doc.to_dict(), "cached": True})
-        return
+        cached = summary_doc.to_dict()
+        if cached.get("prompt_version") == PROMPT_VERSION:
+            yield sse("progress", message="Résumé trouvé en base — restitution immédiate.")
+            yield sse("result", data={**cached, "cached": True})
+            return
+        yield sse("progress", message="Résumé obsolète — régénération avec le nouveau format…")
 
     # ── Récupération de l'article ──────────────────────────────────────────────
     article_doc = db.collection("articles").document(article_id).get()
@@ -222,6 +226,7 @@ async def _summary_event_stream(article_id: str, identifier: str):
         "generated_at": now,
         "word_count_fr": len(summary_fr.split()),
         "word_count_en": len(summary_en.split()),
+        "prompt_version": PROMPT_VERSION,
     }
     summary_ref.set(doc_data)
 

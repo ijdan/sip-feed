@@ -20,29 +20,36 @@ DEFAULT_MODEL_PRIORITY = [
     "gemini-2.0-flash-lite",
 ]
 
-PROMPT_VERSION = "linkedin-v2"
+PROMPT_VERSION = "linkedin-v3"
 
 SUMMARY_PROMPT = """\
-En tant que journaliste expert en technologie, rédige un post LinkedIn basé sur l'article ci-dessous.
+En tant que journaliste expert en technologie avec une plume narrative, rédige un post LinkedIn mémorable \
+basé sur l'article ci-dessous.
 
 Contexte de l'article :
 - Titre : {title}
 - Source : {source}
 
-Ton rôle : tu as lu cet article et tu partages avec ton réseau ce que tu en as retenu. \
-Positionne-toi en expert qui explique, contextualise et met en avant les points clés — pas en simple résumeur.
+Ton style : tu combines la narration journalistique (arc temporel, protagonistes nommés, contexte avant/après) \
+avec un regard contrarian — tu identifies ce que l'article révèle que le consensus habituel occulte ou \
+que la majorité n'a pas encore vu. Tu peux utiliser la première personne avec parcimonie pour apporter \
+ta voix ("ce qui me frappe ici", "je ne m'attendais pas à", "ce que peu ont relevé").
 
 Structure impérative du post (dans cet ordre) :
-1. Contexte (1-2 lignes) : indique le titre de l'article, l'auteur s'il est mentionné dans le texte, et la source. Situe le lecteur dès l'ouverture.
-2. Accroche (1-2 lignes) : une observation forte qui donne envie de lire la suite.
-3. Corps (3-4 paragraphes) : explique ce que tu as compris, pourquoi c'est intéressant, les idées clés dans tes propres mots de journaliste.
+1. Mise en scène (2-3 lignes) : situe l'article dans son contexte narratif — qui sont les acteurs, \
+quelle décision ou tendance est en jeu, depuis quand. Mentionne le titre, l'auteur s'il est nommé dans \
+le texte, et la source.
+2. Retournement (1-2 lignes) : identifie ce que cet article révèle de surprenant, de contre-intuitif \
+ou de sous-estimé par rapport au discours dominant — c'est la phrase qui accroche et qui fait lire la suite.
+3. Développement (3-4 paragraphes) : déroule les idées clés avec la voix d'un analyste qui a compris \
+plus loin que le titre — contexte réel, enjeux, nuances, ce que ça change concrètement.
 4. Section "À retenir :" : 3 à 4 points clés sous forme de tirets simples (- Point).
 
 Règles de format :
 - 300 à 400 mots au total
 - Texte brut uniquement : aucun #, **, *, _ ni > — seuls les tirets (-) de la section "À retenir" sont autorisés
 - Paragraphes séparés par une ligne vide
-- Conserve les noms propres, technologies et chiffres clés de l'article
+- Conserve les noms propres, entreprises, technologies et chiffres clés de l'article
 - N'invente aucun fait absent du texte source
 
 Réponds UNIQUEMENT avec un objet JSON strict :

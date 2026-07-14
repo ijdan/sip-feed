@@ -1,0 +1,51 @@
+name: Refresh feeds — purge + recollecte d'une journée
+
+on:
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "Jour à recharger (YYYY-MM-DD, UTC)"
+        required: true
+      dry_run:
+        description: "Mode dry-run (compte les articles concernés, ne purge/recollecte pas)"
+        type: boolean
+        required: false
+        default: true
+
+env:
+  GCP_PROJECT: tech-news-aggregator-001
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: cd collector && pip install -r requirements.txt --quiet
+
+      - uses: google-github-actions/auth@v3
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - uses: google-github-actions/setup-gcloud@v3
+
+      - name: Récupère GEMINI_API_KEY depuis Secret Manager
+        run: |
+          KEY=$(gcloud secrets versions access latest --secret=GEMINI_API_KEY --project=${{ env.GCP_PROJECT }})
+          echo "::add-mask::$KEY"
+          echo "GEMINI_API_KEY=$KEY" >> "$GITHUB_ENV"
+
+      - name: Purge + recollecte
+        env:
+          FIRESTORE_PROJECT_ID: ${{ env.GCP_PROJECT }}
+          GRPC_DNS_RESOLVER: native
+        run: |
+          cd collector
+          ARGS="${{ inputs.date }}"
+          if [ "${{ inputs.dry_run }}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
+          python refresh_feeds.py $ARGS

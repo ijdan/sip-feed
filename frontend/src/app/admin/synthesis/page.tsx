@@ -260,8 +260,8 @@ export default function SynthesisPage() {
             <div className="px-6 py-5 text-sm leading-relaxed synthesis-content"
               style={{ color: "var(--text)" }}
               dangerouslySetInnerHTML={{
-                __html: s.content === "⚠️ Synthèse indisponible — quota LLM épuisé."
-                  ? `<p style="color:var(--text-muted)">⚠️ Synthèse indisponible — quota LLM épuisé lors de cette exécution.</p>`
+                __html: s.content?.startsWith("⚠️ Synthèse indisponible")
+                  ? `<div style="color:var(--text-muted)">${markdownToHtml(s.content)}</div>`
                   : markdownToHtml(s.content)
               }}
             />

@@ -94,7 +94,7 @@ export default function SynthesisPage() {
         `${API}/articles/${article.id}/summary`,
         { method: "POST", headers: { Authorization: `Bearer ${token}` } }
       );
-      if (!res.ok || !res.body) throw new Error(`API error ${res.status}`);
+      if (!res.ok || !res.body) throw new Error("Erreur lors de la génération du résumé.");
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
@@ -116,21 +116,14 @@ export default function SynthesisPage() {
             setSummaryOpen(true);
             addFavorite(article.id);
           } else if (event.type === "error") {
-            throw new Error(`API error ${event.status ?? 500}: ${event.message}`);
+            throw new Error(event.message || "Erreur lors de la génération du résumé.");
           }
         }
       }
     } catch (err: any) {
       setSummaryLoading(false);
       setSummaryProgressMsg("");
-      const status = err.message?.match(/\d{3}/)?.[0];
-      const msg =
-        status === "503" ? "Résumé indisponible — quota LLM dépassé. Réessayez plus tard."
-        : status === "504" ? "L'article source n'a pas répondu dans les délais."
-        : status === "502" ? "L'article source n'est pas accessible."
-        : status === "404" ? "Article introuvable."
-        : "Erreur lors de la génération du résumé.";
-      setSummaryError(msg);
+      setSummaryError(err.message || "Erreur lors de la génération du résumé.");
       setTimeout(() => setSummaryError(""), 5000);
     }
   };

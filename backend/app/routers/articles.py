@@ -217,7 +217,7 @@ async def _summary_event_stream(article_id: str, identifier: str):
         summary_fr, summary_en, model_used = llm_task.result()
     except Exception as exc:
         logger.error(f"Résumé LLM échoué pour {article_id} : {exc}")
-        yield sse("error", message="Résumé indisponible — quota LLM dépassé. Réessayez plus tard.", status=503)
+        yield sse("error", message=f"Résumé indisponible — {exc}", status=503)
         return
 
     # ── Persistance ────────────────────────────────────────────────────────────

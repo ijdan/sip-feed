@@ -81,7 +81,7 @@ async def fetch_article_text(url: str) -> str:
     async with httpx.AsyncClient(
         timeout=30.0,
         follow_redirects=True,
-        headers={"User-Agent": "Mozilla/5.0 (compatible; SipFeedBot/1.0)"},
+        headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"},
     ) as client:
         response = await client.get(url)
         response.raise_for_status()

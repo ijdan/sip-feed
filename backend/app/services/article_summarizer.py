@@ -131,7 +131,7 @@ def _sync_call_llm_with_progress(
         "max_output_tokens": 2048,
         "response_mime_type": "application/json",
     }
-    last_error: Exception | None = None
+    errors: list[str] = []
     for i, model_name in enumerate(models_to_try):
         if send_progress:
             if i == 0:
@@ -151,9 +151,12 @@ def _sync_call_llm_with_progress(
             logger.info(f"Résumé généré par {model_name}")
             return result.get("summary_fr", ""), result.get("summary_en", ""), model_name
         except Exception as exc:
-            logger.warning(f"Résumé : {model_name} indisponible ({exc.__class__.__name__})")
-            last_error = exc
-    raise last_error or RuntimeError("Aucun modèle LLM disponible")
+            detail = str(exc)[:200]
+            logger.warning(f"Résumé : {model_name} indisponible ({exc.__class__.__name__}: {detail})")
+            errors.append(f"{model_name} ({exc.__class__.__name__} : {detail})")
+    raise RuntimeError(
+        "tous les modèles ont échoué — " + "; ".join(errors) if errors else "aucun modèle LLM disponible"
+    )
 
 
 async def generate_summary(text: str, models_to_try: list[str]) -> tuple[str, str, str]:

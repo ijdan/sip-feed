@@ -340,6 +340,7 @@ def generate_synthesis(articles: list[dict], interest: str, model_priority: list
     )
 
     models_to_try = model_priority or DEFAULT_MODEL_PRIORITY
+    errors = []
     for model_name in models_to_try:
         try:
             m = genai.GenerativeModel(model_name, generation_config=config)
@@ -351,9 +352,15 @@ def generate_synthesis(articles: list[dict], interest: str, model_priority: list
                 "cited_ids": result.get("cited_ids", []),
             }
         except Exception as e:
-            logger.warning(f"Synthèse : {model_name} indisponible ({e.__class__.__name__})")
+            detail = str(e)[:200]
+            logger.warning(f"Synthèse : {model_name} indisponible ({e.__class__.__name__}: {detail})")
+            errors.append(f"- **{model_name}** : {e.__class__.__name__} — {detail}")
 
-    return {"synthesis": "⚠️ Synthèse indisponible — quota LLM épuisé.", "cited_ids": []}
+    details = "\n".join(errors)
+    return {
+        "synthesis": f"⚠️ Synthèse indisponible — tous les modèles LLM ont échoué :\n{details}",
+        "cited_ids": [],
+    }
 
 
 REPORT_PROMPT = """

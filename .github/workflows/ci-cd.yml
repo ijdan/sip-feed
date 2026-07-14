@@ -75,6 +75,7 @@ jobs:
           python -m py_compile scrapers/web_scraper.py
           python -m py_compile scrapers/gmail_reader.py
           python -m py_compile processors/gemini_processor.py
+          python -m py_compile reprocess_raw_articles.py
       - name: Tests fonctionnels — Scraper & Collector
         env:
           GEMINI_API_KEY: "AIza_CI_TEST_DUMMY_KEY"

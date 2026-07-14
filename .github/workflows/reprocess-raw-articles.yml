@@ -1,0 +1,57 @@
+name: Reprocess — Ré-enrichissement IA des articles bruts
+
+on:
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "Jour à retraiter (YYYY-MM-DD, UTC). Vide = hier."
+        required: false
+        default: ''
+      dry_run:
+        description: "Mode dry-run (n'écrit rien, liste seulement)"
+        type: boolean
+        required: false
+        default: true
+      batch_size:
+        description: "Taille des lots envoyés à Gemini"
+        required: false
+        default: '15'
+
+env:
+  GCP_PROJECT: tech-news-aggregator-001
+
+jobs:
+  reprocess:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: cd collector && pip install -r requirements.txt --quiet
+
+      - uses: google-github-actions/auth@v3
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - uses: google-github-actions/setup-gcloud@v3
+
+      - name: Récupère GEMINI_API_KEY depuis Secret Manager
+        run: |
+          KEY=$(gcloud secrets versions access latest --secret=GEMINI_API_KEY --project=${{ env.GCP_PROJECT }})
+          echo "::add-mask::$KEY"
+          echo "GEMINI_API_KEY=$KEY" >> "$GITHUB_ENV"
+
+      - name: Lance le retraitement
+        env:
+          FIRESTORE_PROJECT_ID: ${{ env.GCP_PROJECT }}
+          GRPC_DNS_RESOLVER: native
+        run: |
+          cd collector
+          ARGS="--batch-size ${{ inputs.batch_size }}"
+          if [ -n "${{ inputs.date }}" ]; then ARGS="$ARGS --date ${{ inputs.date }}"; fi
+          if [ "${{ inputs.dry_run }}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
+          python reprocess_raw_articles.py $ARGS

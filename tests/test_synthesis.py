@@ -354,6 +354,23 @@ def test_run_synthesis_regenerates_on_new_article_in_perimeter(monkeypatch):
     assert db.written  # régénérée
 
 
+def test_run_synthesis_manual_trigger_bypasses_skip(monkeypatch):
+    """Déclenchement manuel (new_articles=None) → régénération forcée,
+    même si la synthèse du jour est à jour pour le même périmètre."""
+    import processors.synthesis as synthesis
+
+    _stub_synthesis(monkeypatch, synthesis)
+    existing = {_today(): {"interest": "IA", "source_ids": [], "categories": [],
+                           "content": "ancienne synthèse"}}
+    db = _FakeDb(ARTICLES, existing_syntheses=existing)
+    settings = {"interest": "IA", "synthesis_source_ids": [], "synthesis_categories": []}
+
+    synthesis.run_synthesis(db, settings, ["fake-model"], new_articles=None)
+
+    assert db.written  # régénérée malgré un doc à jour
+    assert next(iter(db.written.values()))["content"] == "ok"
+
+
 def test_run_synthesis_retries_after_failed_synthesis(monkeypatch):
     """Une synthèse du jour en échec (⚠️) est retentée même sans nouvel article."""
     import processors.synthesis as synthesis

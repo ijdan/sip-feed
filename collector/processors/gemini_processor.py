@@ -329,8 +329,9 @@ def generate_synthesis(articles: list[dict], interest: str, model_priority: list
     for a in articles:
         article_id = a.get("id", "")
         title = a.get("title_fr") or a.get("title", "")
-        desc = a.get("long_description_fr") or a.get("long_description", "")[:500]
-        articles_text += f"[ID:{article_id}] {title}\n{desc}\n\n"
+        # Texte intégral nettoyé si fourni (cf. processors/synthesis.py), sinon résumé stocké
+        body = a.get("synthesis_content") or a.get("long_description_fr") or a.get("long_description", "")[:500]
+        articles_text += f"[ID:{article_id}] {title}\n{body}\n\n"
 
     config = {"temperature": LLM_TEMPERATURE, "max_output_tokens": LLM_MAX_TOKENS_SYNTHESIS, "response_mime_type": "application/json"}
     prompt = SYNTHESIS_PROMPT.format(

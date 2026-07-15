@@ -140,7 +140,9 @@ def run_synthesis(db, global_settings: dict, model_priority: list[str],
             same_scope = (previous.get("interest") == interest
                           and previous.get("source_ids", []) == source_ids
                           and previous.get("categories", []) == categories)
-            if same_scope and not filter_articles(new_articles, source_ids, categories):
+            # Une synthèse en échec (⚠️ quota LLM…) doit être retentée au run suivant
+            previous_failed = str(previous.get("content", "")).startswith("⚠️")
+            if same_scope and not previous_failed and not filter_articles(new_articles, source_ids, categories):
                 logger.info("Synthèse du jour déjà à jour — aucun nouvel article dans le périmètre, "
                             "aucun appel LLM.")
                 return

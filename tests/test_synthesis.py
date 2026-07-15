@@ -354,6 +354,22 @@ def test_run_synthesis_regenerates_on_new_article_in_perimeter(monkeypatch):
     assert db.written  # régénérée
 
 
+def test_run_synthesis_retries_after_failed_synthesis(monkeypatch):
+    """Une synthèse du jour en échec (⚠️) est retentée même sans nouvel article."""
+    import processors.synthesis as synthesis
+
+    _stub_synthesis(monkeypatch, synthesis)
+    existing = {_today(): {"interest": "IA", "source_ids": [], "categories": [],
+                           "content": "⚠️ Synthèse indisponible — tous les modèles LLM ont échoué"}}
+    db = _FakeDb(ARTICLES, existing_syntheses=existing)
+    settings = {"interest": "IA", "synthesis_source_ids": [], "synthesis_categories": []}
+
+    synthesis.run_synthesis(db, settings, ["fake-model"], new_articles=[])
+
+    assert db.written  # retry effectué
+    assert next(iter(db.written.values()))["content"] == "ok"
+
+
 def test_run_synthesis_regenerates_on_scope_change(monkeypatch):
     """Un changement de centre d'intérêt ou de périmètre force la régénération,
     même sans nouvel article."""

@@ -64,6 +64,8 @@ class GlobalSettings(BaseModel):
     # Périmètre de la synthèse du jour — liste vide = aucune restriction
     synthesis_source_ids: list[str] = []
     synthesis_categories: list[str] = []
+    # Volume max de texte (caractères) envoyé au LLM pour la synthèse
+    synthesis_max_input_chars: int = 180_000
 
 
 def _get_access_token() -> str:

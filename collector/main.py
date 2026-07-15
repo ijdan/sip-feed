@@ -131,6 +131,7 @@ def run():
             logger.error(f"Erreur inattendue source {source['name']} : {type(e).__name__}: {e}")
 
     articles_collected = 0
+    enriched_articles: list[dict] = []
 
     if not all_raw:
         logger.info("Aucun nouvel article à traiter — rétention non appliquée.")
@@ -161,7 +162,7 @@ def run():
     # Synthèse du jour — périmètre admin + contenu intégral (cf. processors/synthesis.py)
     if interest:
         try:
-            run_synthesis(db, global_settings, model_priority)
+            run_synthesis(db, global_settings, model_priority, new_articles=enriched_articles)
         except Exception as e:
             logger.error(f"Erreur lors de la génération de la synthèse : {e}")
 

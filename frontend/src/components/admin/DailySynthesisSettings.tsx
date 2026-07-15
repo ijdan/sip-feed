@@ -13,7 +13,11 @@ interface Settings {
   interest: string;
   synthesis_source_ids: string[];
   synthesis_categories: string[];
+  synthesis_max_input_chars: number;
 }
+
+const MAX_INPUT_OPTIONS = [30_000, 60_000, 120_000, 180_000, 250_000];
+const DEFAULT_MAX_INPUT = 180_000;
 
 interface Source {
   id: string;
@@ -35,6 +39,7 @@ export default function DailySynthesisSettings({ token }: { token: string }) {
   const [sourceIds, setSourceIds] = useState<string[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
   const [interest, setInterest] = useState("");
+  const [maxInputChars, setMaxInputChars] = useState(DEFAULT_MAX_INPUT);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState(false);
@@ -44,6 +49,7 @@ export default function DailySynthesisSettings({ token }: { token: string }) {
     setSourceIds(settings.synthesis_source_ids ?? []);
     setCategories(settings.synthesis_categories ?? []);
     setInterest(settings.interest ?? "");
+    setMaxInputChars(settings.synthesis_max_input_chars ?? DEFAULT_MAX_INPUT);
   }, [settings]);
 
   const toggleSource = (id: string) =>
@@ -62,6 +68,7 @@ export default function DailySynthesisSettings({ token }: { token: string }) {
         interest,
         synthesis_source_ids: sourceIds,
         synthesis_categories: categories,
+        synthesis_max_input_chars: maxInputChars,
       });
       mutate("admin-settings");
       setSaved(true);
@@ -119,6 +126,28 @@ export default function DailySynthesisSettings({ token }: { token: string }) {
             />
           ))}
         </div>
+      </div>
+
+      {/* Volume max envoyé au LLM */}
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <p className="text-sm font-medium text-gray-700">Volume max envoyé au LLM</p>
+          <p className="text-xs text-gray-400">
+            Plafond de texte (caractères) transmis à Gemini pour la synthèse — borne la consommation de tokens.
+          </p>
+        </div>
+        <select
+          value={maxInputChars}
+          onChange={(e) => setMaxInputChars(Number(e.target.value))}
+          disabled={saving}
+          className="border rounded px-3 py-1 text-sm text-gray-700 bg-white disabled:opacity-50"
+        >
+          {MAX_INPUT_OPTIONS.map((n) => (
+            <option key={n} value={n}>
+              {n.toLocaleString("fr-FR")} caractères
+            </option>
+          ))}
+        </select>
       </div>
 
       {/* Centre d'intérêt */}

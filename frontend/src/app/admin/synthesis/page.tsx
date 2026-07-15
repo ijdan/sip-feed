@@ -173,7 +173,11 @@ export default function SynthesisPage() {
                 <p className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
                   {new Date(s.date).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })}
                   {" · "}{s.articles_count} articles analysés
+                  {s.perimeter_count != null && s.perimeter_count !== s.articles_count &&
+                    ` (sur ${s.perimeter_count} dans le périmètre)`}
                   {" · "}{new Date(s.generated_at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
+                  {s.usage?.total_tokens > 0 &&
+                    ` · ${s.usage.total_tokens.toLocaleString("fr-FR")} tokens LLM`}
                 </p>
               </div>
             </div>

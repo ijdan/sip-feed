@@ -317,13 +317,82 @@ cited_ids doit contenir uniquement les IDs des articles que tu as réellement ut
 """
 
 
-def generate_synthesis(articles: list[dict], interest: str, model_priority: list[str] | None = None) -> dict:
-    """Génère une synthèse ciblée. Retourne {synthesis, cited_ids}."""
+def _usage_from_response(response) -> dict:
+    """Extrait la consommation de tokens d'une réponse Gemini (0 si indisponible)."""
+    meta = getattr(response, "usage_metadata", None)
+    return {
+        "prompt_tokens": getattr(meta, "prompt_token_count", 0) or 0,
+        "output_tokens": getattr(meta, "candidates_token_count", 0) or 0,
+        "total_tokens": getattr(meta, "total_token_count", 0) or 0,
+    }
+
+
+SELECTION_PROMPT = """
+Tu es un assistant de veille technologique.
+
+Centre d'intérêt : {interest}
+
+Voici {count} articles (titre + résumé), chacun identifié par un ID unique.
+Sélectionne UNIQUEMENT les articles réellement pertinents pour le centre d'intérêt,
+au maximum {max_selected}. Sois strict : en cas de doute, écarte l'article.
+
+Articles :
+{articles}
+
+Réponds en JSON strict : {{"selected_ids": ["id1", "id2", ...]}}
+Si aucun article n'est pertinent, réponds {{"selected_ids": []}}.
+"""
+
+
+def select_relevant_articles(articles: list[dict], interest: str, model_priority: list[str] | None = None,
+                             max_selected: int = 25) -> dict | None:
+    """Étape 1 de la synthèse : sélectionne sur les seuls résumés les articles
+    pertinents pour le centre d'intérêt (appel LLM léger, avant récupération
+    du contenu intégral). Retourne {selected_ids, usage}, ou None si tous les
+    modèles ont échoué."""
     import logging
     logger = logging.getLogger(__name__)
 
+    articles_text = ""
+    for a in articles:
+        title = a.get("title_fr") or a.get("title", "")
+        desc = (a.get("long_description_fr") or a.get("long_description", ""))[:400]
+        articles_text += f"[ID:{a.get('id', '')}] {title}\n{desc}\n\n"
+
+    config = {"temperature": 0.1, "max_output_tokens": 2_000, "response_mime_type": "application/json"}
+    prompt = SELECTION_PROMPT.format(
+        interest=interest,
+        count=len(articles),
+        max_selected=max_selected,
+        articles=articles_text[:MAX_SYNTHESIS_INPUT],
+    )
+
+    models_to_try = model_priority or DEFAULT_MODEL_PRIORITY
+    for model_name in models_to_try:
+        try:
+            m = genai.GenerativeModel(model_name, generation_config=config)
+            response = m.generate_content(prompt)
+            result = json.loads(response.text.strip())
+            ids = [i for i in result.get("selected_ids", []) if isinstance(i, str)][:max_selected]
+            usage = _usage_from_response(response)
+            logger.info(f"Sélection par {model_name} — {len(ids)}/{len(articles)} article(s) retenus, "
+                        f"{usage['total_tokens']} tokens")
+            return {"selected_ids": ids, "usage": usage}
+        except Exception as e:
+            logger.warning(f"Sélection : {model_name} indisponible ({e.__class__.__name__}: {str(e)[:200]})")
+
+    return None
+
+
+def generate_synthesis(articles: list[dict], interest: str, model_priority: list[str] | None = None,
+                       max_input_chars: int = MAX_SYNTHESIS_INPUT) -> dict:
+    """Génère une synthèse ciblée. Retourne {synthesis, cited_ids, usage}."""
+    import logging
+    logger = logging.getLogger(__name__)
+
+    _no_usage = {"prompt_tokens": 0, "output_tokens": 0, "total_tokens": 0}
     if not interest.strip():
-        return {"synthesis": "", "cited_ids": []}
+        return {"synthesis": "", "cited_ids": [], "usage": _no_usage}
 
     articles_text = ""
     for a in articles:
@@ -337,7 +406,7 @@ def generate_synthesis(articles: list[dict], interest: str, model_priority: list
     prompt = SYNTHESIS_PROMPT.format(
         interest=interest,
         count=len(articles),
-        articles=articles_text[:180000],
+        articles=articles_text[:max_input_chars],
     )
 
     models_to_try = model_priority or DEFAULT_MODEL_PRIORITY
@@ -347,10 +416,13 @@ def generate_synthesis(articles: list[dict], interest: str, model_priority: list
             m = genai.GenerativeModel(model_name, generation_config=config)
             response = m.generate_content(prompt)
             result = json.loads(response.text.strip())
-            logger.info(f"Synthèse générée par {model_name} — {len(result.get('cited_ids', []))} articles cités")
+            usage = _usage_from_response(response)
+            logger.info(f"Synthèse générée par {model_name} — {len(result.get('cited_ids', []))} articles cités, "
+                        f"{usage['total_tokens']} tokens")
             return {
                 "synthesis": result.get("synthesis", ""),
                 "cited_ids": result.get("cited_ids", []),
+                "usage": usage,
             }
         except Exception as e:
             detail = str(e)[:200]
@@ -361,6 +433,7 @@ def generate_synthesis(articles: list[dict], interest: str, model_priority: list
     return {
         "synthesis": f"⚠️ Synthèse indisponible — tous les modèles LLM ont échoué :\n{details}",
         "cited_ids": [],
+        "usage": _no_usage,
     }
 
 

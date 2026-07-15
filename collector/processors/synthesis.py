@@ -17,7 +17,7 @@ from datetime import datetime, date
 import httpx
 from bs4 import BeautifulSoup, Comment
 
-from processors.gemini_processor import generate_synthesis, MAX_SYNTHESIS_INPUT
+from processors.gemini_processor import generate_synthesis, select_relevant_articles, MAX_SYNTHESIS_INPUT
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +27,8 @@ MAX_CHARS_PER_ARTICLE = 12_000    # plafond de texte intégral par article
 MIN_TEXT_LENGTH = 200             # en dessous, le texte extrait est jugé inexploitable
 RECENT_ARTICLES_POOL = 500        # articles récents lus avant filtrage
 SYNTHESIS_CORPUS_SIZE = 100       # taille max du corpus de synthèse
+SELECTION_MIN_CORPUS = 8          # en dessous, la pré-sélection LLM coûterait plus qu'elle n'économise
+SELECTION_MAX_ARTICLES = 25       # articles max retenus par la pré-sélection
 
 # Balises sans valeur textuelle pour la synthèse (mise en page, médias, code embarqué)
 _STRIPPED_TAGS = ["script", "style", "img", "svg", "picture", "video", "audio",
@@ -80,7 +82,7 @@ def filter_articles(articles: list[dict], source_ids: list[str], categories: lis
     return selected[:SYNTHESIS_CORPUS_SIZE]
 
 
-def build_corpus(articles: list[dict]) -> list[dict]:
+def build_corpus(articles: list[dict], max_input_chars: int = MAX_SYNTHESIS_INPUT) -> list[dict]:
     """Attache à chaque article son texte intégral nettoyé (`synthesis_content`).
 
     Le budget de caractères est réparti équitablement entre les articles dans
@@ -88,7 +90,7 @@ def build_corpus(articles: list[dict]) -> list[dict]:
     reste dans le corpus : generate_synthesis retombe sur sa description stockée.
     Le contenu téléchargé n'est jamais persisté en Firestore.
     """
-    budget = min(MAX_CHARS_PER_ARTICLE, MAX_SYNTHESIS_INPUT // max(len(articles), 1))
+    budget = min(MAX_CHARS_PER_ARTICLE, max_input_chars // max(len(articles), 1))
     with ThreadPoolExecutor(max_workers=FETCH_MAX_WORKERS) as pool:
         texts = list(pool.map(lambda a: fetch_article_text(a.get("article_url", "")), articles))
 
@@ -104,17 +106,49 @@ def build_corpus(articles: list[dict]) -> list[dict]:
     return articles
 
 
-def run_synthesis(db, global_settings: dict, model_priority: list[str]) -> None:
-    """Génère la synthèse du jour et l'écrit dans `syntheses/{date}`."""
+def _add_usage(total: dict, usage: dict | None) -> dict:
+    """Cumule la consommation de tokens de plusieurs appels LLM."""
+    for key in total:
+        total[key] += (usage or {}).get(key, 0)
+    return total
+
+
+def run_synthesis(db, global_settings: dict, model_priority: list[str],
+                  new_articles: list[dict] | None = None) -> None:
+    """Génère la synthèse du jour et l'écrit dans `syntheses/{date}`.
+
+    `new_articles` : articles ajoutés par le run en cours. Si la synthèse du
+    jour existe déjà pour le même périmètre et qu'aucun nouvel article n'y
+    entre, la génération est sautée (aucun token consommé).
+    """
     interest = global_settings.get("interest", "").strip()
     if not interest:
         return
 
     source_ids = global_settings.get("synthesis_source_ids") or []
     categories = global_settings.get("synthesis_categories") or []
+    max_input_chars = int(global_settings.get("synthesis_max_input_chars") or MAX_SYNTHESIS_INPUT)
+    today_ref = db.collection("syntheses").document(date.today().isoformat())
+
+    # Levier économie n°1 : ne pas régénérer si rien n'a changé depuis la
+    # synthèse du jour (même centre d'intérêt, même périmètre, aucun nouvel
+    # article dans le périmètre).
+    if new_articles is not None:
+        snapshot = today_ref.get()
+        if snapshot.exists:
+            previous = snapshot.to_dict() or {}
+            same_scope = (previous.get("interest") == interest
+                          and previous.get("source_ids", []) == source_ids
+                          and previous.get("categories", []) == categories)
+            if same_scope and not filter_articles(new_articles, source_ids, categories):
+                logger.info("Synthèse du jour déjà à jour — aucun nouvel article dans le périmètre, "
+                            "aucun appel LLM.")
+                return
+
     logger.info(f"Génération de la synthèse pour : «{interest}»...")
     logger.info(f"Périmètre — sources : {', '.join(source_ids) if source_ids else 'toutes'} ; "
-                f"thèmes : {', '.join(categories) if categories else 'tous'}")
+                f"thèmes : {', '.join(categories) if categories else 'tous'} ; "
+                f"plafond prompt : {max_input_chars} caractères")
 
     recent = db.collection("articles").order_by(
         "collected_at", direction="DESCENDING"
@@ -122,22 +156,62 @@ def run_synthesis(db, global_settings: dict, model_priority: list[str]) -> None:
     # Filtrage en Python : Firestore n'autorise qu'un seul opérateur `in` par requête
     articles = filter_articles([doc.to_dict() for doc in recent], source_ids, categories)
 
+    usage = {"prompt_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+    corpus: list[dict] = articles
+    result = None
+
     if not articles:
         logger.warning("Aucun article dans le périmètre sélectionné — pas d'appel LLM.")
+        corpus = []
         result = {
             "synthesis": "⚠️ Aucun article dans le périmètre sélectionné (sources/thèmes) — synthèse non générée.",
             "cited_ids": [],
         }
     else:
-        result = generate_synthesis(build_corpus(articles), interest, model_priority)
+        # Levier économie n°2 : pré-sélection sur les seuls résumés, le contenu
+        # intégral n'est téléchargé et envoyé que pour les articles retenus.
+        fetch_full = True
+        if len(articles) > SELECTION_MIN_CORPUS:
+            selection = select_relevant_articles(articles, interest, model_priority, SELECTION_MAX_ARTICLES)
+            if selection is None:
+                logger.warning("Pré-sélection LLM indisponible — synthèse sur les résumés uniquement "
+                               "(pas de contenu intégral).")
+                fetch_full = False
+            else:
+                _add_usage(usage, selection["usage"])
+                selected_ids = set(selection["selected_ids"])
+                selected = [a for a in articles if a.get("id") in selected_ids]
+                if not selected:
+                    logger.info("Pré-sélection : aucun article pertinent — pas de second appel LLM.")
+                    corpus = []
+                    result = {
+                        "synthesis": f"ℹ️ Aucun article du périmètre jugé pertinent pour «{interest}» "
+                                     "— synthèse non générée.",
+                        "cited_ids": [],
+                    }
+                else:
+                    corpus = selected
 
-    db.collection("syntheses").document(date.today().isoformat()).set({
+        if result is None:
+            if fetch_full:
+                corpus = build_corpus(corpus, max_input_chars)
+            result = generate_synthesis(corpus, interest, model_priority, max_input_chars)
+            _add_usage(usage, result.get("usage"))
+
+    # Levier économie n°4 : consommation réelle tracée (logs → rapport de run,
+    # champ `usage` → IHM admin).
+    logger.info(f"Consommation LLM synthèse — {usage['total_tokens']} tokens "
+                f"(prompt : {usage['prompt_tokens']}, sortie : {usage['output_tokens']}).")
+
+    today_ref.set({
         "interest": interest,
         "source_ids": source_ids,
         "categories": categories,
         "content": result["synthesis"],
         "cited_ids": result["cited_ids"],
-        "articles_count": len(articles),
+        "articles_count": len(corpus),
+        "perimeter_count": len(articles),
+        "usage": usage,
         "generated_at": datetime.utcnow().isoformat(),
     })
     logger.info("Synthèse sauvegardée.")

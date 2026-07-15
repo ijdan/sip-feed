@@ -95,6 +95,59 @@ def update_settings(payload: GlobalSettings, _: dict = Depends(require_admin)):
     return payload
 
 
+class SummaryPromptPayload(BaseModel):
+    prompt: str = ""
+
+
+def _summary_prompt_response(db) -> dict:
+    from app.services.article_summarizer import SUMMARY_PROMPT, get_summary_prompt
+
+    doc = db.collection("settings").document("prompts").get()
+    data = doc.to_dict() if doc.exists else {}
+    prompt, version = get_summary_prompt(db)
+    return {
+        "prompt": prompt,
+        "is_custom": bool((data.get("summary_prompt") or "").strip()),
+        "default_prompt": SUMMARY_PROMPT,
+        "prompt_version": version,
+        "updated_at": data.get("summary_prompt_updated_at"),
+        "updated_by": data.get("summary_prompt_updated_by"),
+    }
+
+
+@router.get("/summary-prompt")
+def get_summary_prompt_settings(_: dict = Depends(require_admin)):
+    """Retourne le prompt de génération LinkedIn actif (personnalisé ou défaut)."""
+    return _summary_prompt_response(get_db())
+
+
+@router.put("/summary-prompt")
+def update_summary_prompt(payload: SummaryPromptPayload, current_user: dict = Depends(require_admin)):
+    """Enregistre le prompt personnalisé. Un prompt vide réinitialise au défaut du code."""
+    from datetime import datetime, timezone
+
+    from app.services.article_summarizer import PROMPT_PLACEHOLDERS
+
+    prompt = payload.prompt.strip()
+    if prompt:
+        missing = [p for p in PROMPT_PLACEHOLDERS if p not in prompt]
+        if "{text}" in missing:
+            raise HTTPException(
+                status_code=422,
+                detail="Le prompt doit contenir le placeholder {text} (texte de l'article).",
+            )
+    db = get_db()
+    db.collection("settings").document("prompts").set(
+        {
+            "summary_prompt": prompt,
+            "summary_prompt_updated_at": datetime.now(timezone.utc).isoformat(),
+            "summary_prompt_updated_by": current_user.get("email", ""),
+        },
+        merge=True,
+    )
+    return _summary_prompt_response(db)
+
+
 @router.post("/purge", status_code=204)
 def purge_articles(_: dict = Depends(require_admin)):
     _check_emulator_reachable()

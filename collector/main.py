@@ -1,6 +1,6 @@
 import logging
 import os
-from datetime import datetime, date, timedelta
+from datetime import datetime
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -15,8 +15,9 @@ from scrapers.web_scraper import scrape_source
 from scrapers.gmail_reader import read_gmail_source
 from processors.gemini_processor import (
     enrich_articles_batch, save_raw_articles, generate_run_report,
-    generate_synthesis, TITLE_LOG_MAX_LENGTH,
+    TITLE_LOG_MAX_LENGTH,
 )
+from processors.synthesis import run_synthesis
 
 # Handler pour capturer les logs en mémoire
 class _MemoryHandler(logging.Handler):
@@ -157,21 +158,10 @@ def run():
         # Rétention : nettoyage des anciens articles (seulement si nouveaux articles trouvés)
         apply_retention(retention_days)
 
-    # Synthèse centrée sur le centre d'intérêt (si renseigné)
+    # Synthèse du jour — périmètre admin + contenu intégral (cf. processors/synthesis.py)
     if interest:
         try:
-            logger.info(f"Génération de la synthèse pour : «{interest}»...")
-            all_articles = list(db.collection("articles").order_by("collected_at", direction="DESCENDING").limit(100).stream())
-            articles_for_synthesis = [doc.to_dict() for doc in all_articles]
-            result = generate_synthesis(articles_for_synthesis, interest, model_priority)
-            db.collection("syntheses").document(date.today().isoformat()).set({
-                "interest": interest,
-                "content": result["synthesis"],
-                "cited_ids": result["cited_ids"],
-                "articles_count": len(articles_for_synthesis),
-                "generated_at": datetime.utcnow().isoformat(),
-            })
-            logger.info("Synthèse sauvegardée.")
+            run_synthesis(db, global_settings, model_priority)
         except Exception as e:
             logger.error(f"Erreur lors de la génération de la synthèse : {e}")
 

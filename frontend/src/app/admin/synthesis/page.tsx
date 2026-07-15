@@ -78,6 +78,7 @@ export default function SynthesisPage() {
             setSummaryProgressMsg("");
             setSummaryOpen(true);
             addFavorite(article.id);
+            mutate(); // rafraîchit has_summary → le bouton de la popin passe en couleur accent
           } else if (event.type === "error") {
             throw new Error(event.message || "Erreur lors de la génération du résumé.");
           }
@@ -247,8 +248,14 @@ export default function SynthesisPage() {
               <button
                 onClick={() => { const a = modalArticle; setModalArticle(null); handleSummarize(a); }}
                 disabled={summaryLoading}
+                title={modalArticle.has_summary
+                  ? "Résumé déjà généré — affichage immédiat"
+                  : "Résumé pas encore généré — le clic le crée (appel LLM)"}
                 className="px-4 py-2 rounded text-sm font-medium transition hover:opacity-80 disabled:opacity-50"
-                style={{ backgroundColor: "var(--accent)", color: "#fff" }}>
+                style={{
+                  backgroundColor: modalArticle.has_summary ? "var(--accent)" : "#9ca3af",
+                  color: "#fff",
+                }}>
                 {summaryLoading && summaryArticleId === modalArticle.id ? "…" : "✨ Résumé IA"}
               </button>
               <a href={modalArticle.article_url} target="_blank" rel="noopener noreferrer"

@@ -222,9 +222,14 @@ class _FakeDb:
         self._articles = articles
         self._existing = existing_syntheses or {}
         self.written: dict = {}
+        self.where_calls: list = []
 
     def collection(self, name):
         self._collection = name
+        return self
+
+    def where(self, field, op, value):
+        self.where_calls.append((field, op, value))
         return self
 
     def order_by(self, *args, **kwargs):
@@ -369,6 +374,36 @@ def test_run_synthesis_manual_trigger_bypasses_skip(monkeypatch):
 
     assert db.written  # régénérée malgré un doc à jour
     assert next(iter(db.written.values()))["content"] == "ok"
+
+
+def test_run_synthesis_target_date(monkeypatch):
+    """Génération pour une date choisie : corpus ancré à la fin de ce jour,
+    document écrit dans syntheses/{date choisie}."""
+    import processors.synthesis as synthesis
+
+    _stub_synthesis(monkeypatch, synthesis)
+    db = _FakeDb(ARTICLES)
+    settings = {"interest": "IA", "synthesis_source_ids": [], "synthesis_categories": []}
+
+    synthesis.run_synthesis(db, settings, ["fake-model"], target_date="2026-07-10")
+
+    assert list(db.written.keys()) == ["2026-07-10"]
+    doc = db.written["2026-07-10"]
+    assert doc["target_date"] == "2026-07-10"
+    assert ("collected_at", "<=", "2026-07-10T23:59:59.999999") in db.where_calls
+
+
+def test_run_synthesis_default_date_is_today(monkeypatch):
+    """Sans date ciblée : document du jour, aucun filtre de date sur le corpus."""
+    import processors.synthesis as synthesis
+
+    _stub_synthesis(monkeypatch, synthesis)
+    db = _FakeDb(ARTICLES)
+
+    synthesis.run_synthesis(db, {"interest": "IA"}, ["fake-model"])
+
+    assert list(db.written.keys()) == [_today()]
+    assert db.where_calls == []
 
 
 def test_run_synthesis_retries_after_failed_synthesis(monkeypatch):

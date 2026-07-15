@@ -21,10 +21,27 @@ export default function SynthesisPage() {
     if (status === "authenticated" && role !== "admin") router.replace("/");
   }, [status, role, router]);
 
+  // Filtre optionnel ?date=YYYY-MM-DD (lien « Voir la synthèse » de l'admin)
+  const [dateFilter, setDateFilter] = useState<string | null>(null);
+  const [dateFilterReady, setDateFilterReady] = useState(false);
+  useEffect(() => {
+    const d = new URLSearchParams(window.location.search).get("date");
+    if (d && /^\d{4}-\d{2}-\d{2}$/.test(d)) setDateFilter(d);
+    setDateFilterReady(true);
+  }, []);
+
   const { data, isLoading, mutate } = useSWR(
-    token && role === "admin" ? "admin-syntheses" : null,
-    () => fetch(`${API}/admin/syntheses`, { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json())
+    token && role === "admin" && dateFilterReady
+      ? `admin-syntheses${dateFilter ? `-${dateFilter}` : ""}`
+      : null,
+    () => fetch(`${API}/admin/syntheses${dateFilter ? `?date=${dateFilter}` : ""}`,
+      { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json())
   );
+
+  const clearDateFilter = () => {
+    setDateFilter(null);
+    window.history.replaceState(null, "", "/admin/synthesis");
+  };
 
   const { addFavorite } = usePreferences();
 
@@ -154,12 +171,31 @@ export default function SynthesisPage() {
         </button>
       </div>
 
+      {/* Bandeau filtre date (consultation d'une date générée manuellement) */}
+      {dateFilter && (
+        <div className="rounded-lg border px-4 py-3 flex items-center justify-between gap-4 flex-wrap"
+          style={{ backgroundColor: "var(--surface-2)", borderColor: "var(--border)" }}>
+          <span className="text-sm" style={{ color: "var(--text)" }}>
+            📅 Synthèse du{" "}
+            <strong>{new Date(dateFilter).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</strong>
+          </span>
+          <button onClick={clearDateFilter}
+            className="text-sm hover:underline" style={{ color: "var(--text-muted)" }}>
+            Voir les 3 derniers jours →
+          </button>
+        </div>
+      )}
+
       {syntheses.length === 0 ? (
         <div className="rounded-xl border p-8 text-center"
           style={{ backgroundColor: "var(--surface)", borderColor: "var(--border)" }}>
-          <p className="text-lg mb-2" style={{ color: "var(--text)" }}>Aucune synthèse disponible</p>
+          <p className="text-lg mb-2" style={{ color: "var(--text)" }}>
+            {dateFilter ? "Aucune synthèse pour cette date" : "Aucune synthèse disponible"}
+          </p>
           <p className="text-sm" style={{ color: "var(--text-muted)" }}>
-            Renseignez un centre d'intérêt dans la section « Synthèse du jour » de la console admin et lancez une collecte.
+            {dateFilter
+              ? "Générez-la depuis la section « Synthèse du jour » de la console admin en choisissant cette date."
+              : "Renseignez un centre d'intérêt dans la section « Synthèse du jour » de la console admin et lancez une collecte."}
           </p>
         </div>
       ) : (
@@ -176,7 +212,10 @@ export default function SynthesisPage() {
                   {" · "}{s.articles_count} articles analysés
                   {s.perimeter_count != null && s.perimeter_count !== s.articles_count &&
                     ` (sur ${s.perimeter_count} dans le périmètre)`}
-                  {" · "}{new Date(s.generated_at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
+                  {" · "}
+                  {s.generated_at?.slice(0, 10) !== s.date
+                    ? `générée a posteriori le ${new Date(s.generated_at).toLocaleDateString("fr-FR", { day: "numeric", month: "long" })} à ${new Date(s.generated_at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}`
+                    : new Date(s.generated_at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
                   {s.usage?.total_tokens > 0 &&
                     ` · ${s.usage.total_tokens.toLocaleString("fr-FR")} tokens LLM`}
                 </p>

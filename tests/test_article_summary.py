@@ -49,12 +49,19 @@ def test_summary_reader_forbidden(reader_token):
 
 @requires_backend
 def test_summary_article_not_found(admin_token):
-    """Un article inexistant retourne 404."""
-    r = httpx.post(
+    """Un article inexistant émet un événement SSE d'erreur 404 (HTTP reste 200)."""
+    events = []
+    with httpx.stream(
+        "POST",
         f"{BASE_URL}/articles/article-inexistant-xyz-12345/summary",
         headers={"Authorization": f"Bearer {admin_token}"},
-    )
-    assert r.status_code == 404
+        timeout=30,
+    ) as r:
+        assert r.status_code == 200
+        for line in r.iter_lines():
+            if line.startswith("data: "):
+                events.append(json.loads(line[6:]))
+    assert any(e["type"] == "error" and e.get("status") == 404 for e in events)
 
 
 # ─── Modèle ArticleSummary ───────────────────────────────────────────────────
@@ -260,6 +267,149 @@ def test_llm_handles_markdown_json_wrapper():
 
     assert fr == "FR"
     assert en == "EN"
+
+
+# ─── Prompt paramétrable (settings/prompts) ──────────────────────────────────
+
+def _mock_db_with_prompt_doc(exists: bool, data: dict | None = None):
+    mock_doc = MagicMock()
+    mock_doc.exists = exists
+    mock_doc.to_dict = MagicMock(return_value=data or {})
+    mock_db = MagicMock()
+    mock_db.collection.return_value.document.return_value.get.return_value = mock_doc
+    return mock_db
+
+
+def test_get_summary_prompt_default_when_doc_missing():
+    """Sans document settings/prompts, le prompt par défaut du code est utilisé."""
+    from app.services.article_summarizer import get_summary_prompt, SUMMARY_PROMPT, PROMPT_VERSION
+
+    prompt, version = get_summary_prompt(_mock_db_with_prompt_doc(exists=False))
+    assert prompt == SUMMARY_PROMPT
+    assert version == PROMPT_VERSION
+
+
+def test_get_summary_prompt_default_when_field_empty():
+    """Un champ summary_prompt vide équivaut au prompt par défaut."""
+    from app.services.article_summarizer import get_summary_prompt, SUMMARY_PROMPT, PROMPT_VERSION
+
+    prompt, version = get_summary_prompt(
+        _mock_db_with_prompt_doc(exists=True, data={"summary_prompt": "   "})
+    )
+    assert prompt == SUMMARY_PROMPT
+    assert version == PROMPT_VERSION
+
+
+def test_get_summary_prompt_custom_with_hashed_version():
+    """Un prompt personnalisé est retourné avec une version dérivée de son hash."""
+    from app.services.article_summarizer import get_summary_prompt
+
+    custom = "Résume {text} en un post."
+    prompt, version = get_summary_prompt(
+        _mock_db_with_prompt_doc(exists=True, data={"summary_prompt": custom})
+    )
+    assert prompt == custom
+    assert version.startswith("linkedin-custom-")
+
+    # La version change quand le prompt change (invalidation du cache)
+    _, version2 = get_summary_prompt(
+        _mock_db_with_prompt_doc(exists=True, data={"summary_prompt": custom + " Différent."})
+    )
+    assert version2 != version
+
+
+def test_get_summary_prompt_default_on_firestore_error():
+    """Une erreur Firestore retombe silencieusement sur le prompt par défaut."""
+    from app.services.article_summarizer import get_summary_prompt, SUMMARY_PROMPT, PROMPT_VERSION
+
+    mock_db = MagicMock()
+    mock_db.collection.side_effect = Exception("Firestore indisponible")
+    prompt, version = get_summary_prompt(mock_db)
+    assert prompt == SUMMARY_PROMPT
+    assert version == PROMPT_VERSION
+
+
+def test_render_prompt_substitutes_placeholders():
+    """render_prompt remplace {title}, {source} et {text}."""
+    from app.services.article_summarizer import render_prompt
+
+    result = render_prompt(
+        "Titre : {title} / Source : {source}\n{text}",
+        title="Mon titre", source="Ma source", text="Le corps.",
+    )
+    assert result == "Titre : Mon titre / Source : Ma source\nLe corps."
+
+
+def test_render_prompt_keeps_literal_braces():
+    """Les accolades littérales (ex. exemple JSON) ne cassent pas la substitution."""
+    from app.services.article_summarizer import render_prompt
+
+    template = 'Réponds en JSON : {"summary_fr": "..."}\nArticle : {text}'
+    result = render_prompt(template, title="t", source="s", text="corps")
+    assert '{"summary_fr": "..."}' in result
+    assert "corps" in result
+
+
+def test_default_prompt_contains_placeholders():
+    """Le prompt par défaut contient bien les trois placeholders attendus."""
+    from app.services.article_summarizer import SUMMARY_PROMPT, PROMPT_PLACEHOLDERS
+
+    for placeholder in PROMPT_PLACEHOLDERS:
+        assert placeholder in SUMMARY_PROMPT
+
+
+# ─── Endpoints admin /admin/summary-prompt ───────────────────────────────────
+
+@requires_backend
+def test_summary_prompt_no_auth():
+    """Sans token, l'endpoint admin retourne 401 ou 403."""
+    r = httpx.get(f"{BASE_URL}/admin/summary-prompt")
+    assert r.status_code in (401, 403)
+
+
+@requires_backend
+def test_summary_prompt_reader_forbidden(reader_token):
+    """Un reader n'a pas accès au prompt."""
+    r = httpx.get(
+        f"{BASE_URL}/admin/summary-prompt",
+        headers={"Authorization": f"Bearer {reader_token}"},
+    )
+    assert r.status_code == 403
+
+
+@requires_backend
+def test_summary_prompt_requires_text_placeholder(admin_token):
+    """Un prompt sans {text} est rejeté en 422."""
+    r = httpx.put(
+        f"{BASE_URL}/admin/summary-prompt",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={"prompt": "Prompt sans le placeholder obligatoire."},
+    )
+    assert r.status_code == 422
+
+
+@requires_backend
+def test_summary_prompt_roundtrip_and_reset(admin_token):
+    """PUT personnalise le prompt, PUT vide réinitialise au défaut."""
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    custom = "Prompt de test : résume {text} pour LinkedIn."
+    try:
+        r = httpx.put(f"{BASE_URL}/admin/summary-prompt", headers=headers, json={"prompt": custom})
+        assert r.status_code == 200
+        body = r.json()
+        assert body["prompt"] == custom
+        assert body["is_custom"] is True
+        assert body["prompt_version"].startswith("linkedin-custom-")
+
+        r = httpx.get(f"{BASE_URL}/admin/summary-prompt", headers=headers)
+        assert r.status_code == 200
+        assert r.json()["prompt"] == custom
+    finally:
+        r = httpx.put(f"{BASE_URL}/admin/summary-prompt", headers=headers, json={"prompt": ""})
+        assert r.status_code == 200
+        body = r.json()
+        assert body["is_custom"] is False
+        assert body["prompt"] == body["default_prompt"]
 
 
 # ─── get_model_priority ───────────────────────────────────────────────────────

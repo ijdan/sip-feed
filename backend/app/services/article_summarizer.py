@@ -1,5 +1,6 @@
 import os
 import json
+import hashlib
 import logging
 import asyncio
 
@@ -53,16 +54,49 @@ Règles de format :
 - N'invente aucun fait absent du texte source
 
 Réponds UNIQUEMENT avec un objet JSON strict :
-{{
+{
   "summary_fr": "post LinkedIn en français (300-400 mots, texte brut)",
   "summary_en": "LinkedIn post in English (300-400 words, plain text)"
-}}
+}
 
 Article :
 ---
 {text}
 ---
 """
+
+# Placeholders attendus dans le template de prompt (substitution littérale,
+# pas str.format — un prompt édité par l'admin peut contenir des accolades).
+PROMPT_PLACEHOLDERS = ["{title}", "{source}", "{text}"]
+
+
+def render_prompt(template: str, title: str, source: str, text: str) -> str:
+    """Substitue les placeholders {title}, {source}, {text} dans le template."""
+    return (
+        template
+        .replace("{title}", title)
+        .replace("{source}", source)
+        .replace("{text}", text)
+    )
+
+
+def get_summary_prompt(db) -> tuple[str, str]:
+    """Retourne (template, version) du prompt de résumé.
+
+    Lit settings/prompts.summary_prompt en Firestore ; si absent ou vide,
+    retombe sur SUMMARY_PROMPT. La version d'un prompt personnalisé est dérivée
+    de son hash pour invalider le cache article_summaries à chaque modification.
+    """
+    try:
+        doc = db.collection("settings").document("prompts").get()
+        if doc.exists:
+            custom = (doc.to_dict().get("summary_prompt") or "").strip()
+            if custom:
+                digest = hashlib.sha256(custom.encode("utf-8")).hexdigest()[:12]
+                return custom, f"linkedin-custom-{digest}"
+    except Exception as exc:
+        logger.warning(f"Impossible de lire le prompt personnalisé : {exc}")
+    return SUMMARY_PROMPT, PROMPT_VERSION
 
 _STRIP_TAGS = [
     "script", "style", "nav", "header", "footer", "aside",
@@ -114,14 +148,18 @@ def _sync_call_llm_with_progress(
     models_to_try: list[str],
     send_progress: Callable[[str], None] | None,
     article_meta: dict | None = None,
+    prompt_template: str | None = None,
 ) -> tuple[str, str, str]:
     """Cascade LLM synchrone avec callbacks de progression.
 
     send_progress est appelé depuis le thread — utiliser call_soon_threadsafe côté appelant.
+    prompt_template permet d'injecter le prompt personnalisé lu en Firestore
+    (défaut : SUMMARY_PROMPT).
     """
     genai.configure(api_key=os.environ["GEMINI_API_KEY"])
     meta = article_meta or {}
-    prompt = SUMMARY_PROMPT.format(
+    prompt = render_prompt(
+        prompt_template or SUMMARY_PROMPT,
         title=meta.get("title") or "Non renseigné",
         source=meta.get("source") or "Non renseignée",
         text=text,

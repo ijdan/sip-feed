@@ -15,8 +15,8 @@ from app.models.article import Article, ArticleList
 from app.services.article_summarizer import (
     fetch_article_text,
     get_model_priority,
+    get_summary_prompt,
     _sync_call_llm_with_progress,
-    PROMPT_VERSION,
 )
 
 router = APIRouter()
@@ -152,13 +152,16 @@ async def _summary_event_stream(article_id: str, identifier: str):
 
     db = get_db()
 
+    # Prompt actif (personnalisé via l'admin, ou défaut du code) et sa version
+    prompt_template, prompt_version = get_summary_prompt(db)
+
     # ── Cache Firestore ────────────────────────────────────────────────────────
     yield sse("progress", message="Recherche en base…")
     summary_ref = db.collection("article_summaries").document(article_id)
     summary_doc = summary_ref.get()
     if summary_doc.exists:
         cached = summary_doc.to_dict()
-        if cached.get("prompt_version") == PROMPT_VERSION:
+        if cached.get("prompt_version") == prompt_version:
             yield sse("progress", message="Résumé trouvé en base — restitution immédiate.")
             yield sse("result", data={**cached, "cached": True})
             return
@@ -200,7 +203,9 @@ async def _summary_event_stream(article_id: str, identifier: str):
         loop.call_soon_threadsafe(progress_queue.put_nowait, msg)
 
     llm_task = asyncio.create_task(
-        asyncio.to_thread(_sync_call_llm_with_progress, text, model_priority, send_progress, article_meta)
+        asyncio.to_thread(
+            _sync_call_llm_with_progress, text, model_priority, send_progress, article_meta, prompt_template
+        )
     )
 
     # Drain la queue de progression pendant que le thread tourne
@@ -231,7 +236,7 @@ async def _summary_event_stream(article_id: str, identifier: str):
         "generated_at": now,
         "word_count_fr": len(summary_fr.split()),
         "word_count_en": len(summary_en.split()),
-        "prompt_version": PROMPT_VERSION,
+        "prompt_version": prompt_version,
     }
     summary_ref.set(doc_data)
 

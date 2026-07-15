@@ -87,7 +87,10 @@ export default function FeedPage() {
     setSummaryLoading(true);
     setSummaryProgressMsg("Initialisation…");
     setSummaryError("");
-    setSummaryArticleId(article.id);
+    // Invalide le cache local : summaryArticleId n'est reposé qu'à la réception
+    // du résultat, sinon un échec laisserait summaryData (ancien article)
+    // associé au nouvel id et rouvrirait le mauvais résumé.
+    setSummaryArticleId(null);
     try {
       const res = await fetch(
         `${process.env.NEXT_PUBLIC_API_URL}/articles/${article.id}/summary`,
@@ -112,6 +115,7 @@ export default function FeedPage() {
             setSummaryProgressMsg(event.message);
           } else if (event.type === "result") {
             setSummaryData(event.data);
+            setSummaryArticleId(article.id);
             setSummaryLoading(false);
             setSummaryProgressMsg("");
             setSummaryOpen(true);

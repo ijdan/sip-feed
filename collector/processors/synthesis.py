@@ -91,6 +91,8 @@ def build_corpus(articles: list[dict], max_input_chars: int = MAX_SYNTHESIS_INPU
     Le contenu téléchargé n'est jamais persisté en Firestore.
     """
     budget = min(MAX_CHARS_PER_ARTICLE, max_input_chars // max(len(articles), 1))
+    logger.info(f"Téléchargement du contenu intégral de {len(articles)} article(s) "
+                f"({FETCH_MAX_WORKERS} en parallèle, timeout {FETCH_TIMEOUT}s)...")
     with ThreadPoolExecutor(max_workers=FETCH_MAX_WORKERS) as pool:
         texts = list(pool.map(lambda a: fetch_article_text(a.get("article_url", "")), articles))
 
@@ -174,6 +176,8 @@ def run_synthesis(db, global_settings: dict, model_priority: list[str],
         # intégral n'est téléchargé et envoyé que pour les articles retenus.
         fetch_full = True
         if len(articles) > SELECTION_MIN_CORPUS:
+            logger.info(f"Pré-sélection LLM sur {len(articles)} résumé(s) "
+                        f"(max {SELECTION_MAX_ARTICLES} articles retenus)...")
             selection = select_relevant_articles(articles, interest, model_priority, SELECTION_MAX_ARTICLES)
             if selection is None:
                 logger.warning("Pré-sélection LLM indisponible — synthèse sur les résumés uniquement "
@@ -183,6 +187,12 @@ def run_synthesis(db, global_settings: dict, model_priority: list[str],
                 _add_usage(usage, selection["usage"])
                 selected_ids = set(selection["selected_ids"])
                 selected = [a for a in articles if a.get("id") in selected_ids]
+                if len(selected) < len(selected_ids):
+                    logger.warning(f"Pré-sélection : {len(selected_ids) - len(selected)} ID(s) renvoyés "
+                                   "par le LLM absents du corpus — ignorés.")
+                if selected:
+                    titres = " | ".join((a.get("title_fr") or a.get("title", "?"))[:50] for a in selected)
+                    logger.info(f"Articles retenus pour la synthèse : {titres}")
                 if not selected:
                     logger.info("Pré-sélection : aucun article pertinent — pas de second appel LLM.")
                     corpus = []

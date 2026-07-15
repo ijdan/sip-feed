@@ -20,6 +20,8 @@ interface Settings {
 const MAX_INPUT_OPTIONS = [30_000, 60_000, 120_000, 180_000, 250_000];
 const DEFAULT_MAX_INPUT = 180_000;
 
+const todayISO = () => new Date().toISOString().slice(0, 10);
+
 interface Source {
   id: string;
   name: string;
@@ -90,11 +92,13 @@ export default function DailySynthesisSettings({ token }: { token: string }) {
   const [generating, setGenerating] = useState(false);
   const [generateMsg, setGenerateMsg] = useState("");
   const [generateDone, setGenerateDone] = useState(false);
+  const [synthesisDate, setSynthesisDate] = useState(todayISO());
 
   const launchGeneration = async () => {
     if (!token || !settings || generating) return;
     setGenerating(true);
     setGenerateDone(false);
+    const targetDate = synthesisDate || todayISO();
     try {
       if (!interest.trim()) {
         throw new Error("Renseignez un centre d'intérêt avant de générer.");
@@ -103,16 +107,16 @@ export default function DailySynthesisSettings({ token }: { token: string }) {
       setGenerateMsg("Sauvegarde du périmètre…");
       await persist();
 
-      const before = (await api.admin.syntheses(token))?.syntheses?.[0]?.generated_at ?? null;
-      await api.admin.generateSynthesis(token);
-      setGenerateMsg("Génération en cours… (~1 à 2 min)");
+      const before = (await api.admin.syntheses(token, targetDate))?.syntheses?.[0]?.generated_at ?? null;
+      await api.admin.generateSynthesis(token, targetDate);
+      setGenerateMsg(`Génération pour le ${targetDate} en cours… (~1 à 2 min)`);
 
-      // Le job est asynchrone : on re-interroge jusqu'à voir une synthèse
-      // plus récente (toutes les 10 s, abandon après 5 min).
+      // Le job est asynchrone : on re-interroge la date ciblée jusqu'à voir
+      // une synthèse plus récente (toutes les 10 s, abandon après 5 min).
       const startedAt = Date.now();
       const poll = async () => {
         try {
-          const fresh = await api.admin.syntheses(token);
+          const fresh = await api.admin.syntheses(token, targetDate);
           const latest = fresh?.syntheses?.[0]?.generated_at ?? null;
           if (latest && latest !== before) {
             setGenerating(false);
@@ -233,14 +237,25 @@ export default function DailySynthesisSettings({ token }: { token: string }) {
 
       {/* Génération manuelle */}
       <div className="border-t pt-4 flex items-center gap-3 flex-wrap">
+        <label className="flex items-center gap-2 text-sm text-gray-700">
+          Date de la synthèse
+          <input
+            type="date"
+            value={synthesisDate}
+            max={todayISO()}
+            onChange={(e) => setSynthesisDate(e.target.value)}
+            disabled={generating}
+            className="border rounded px-2 py-1.5 text-sm text-gray-700 bg-white disabled:opacity-50"
+          />
+        </label>
         <button
           onClick={launchGeneration}
           disabled={generating || !settings}
-          title="Sauvegarde le périmètre affiché puis régénère la synthèse du jour, sans lancer de collecte (consomme des tokens LLM)"
+          title="Sauvegarde le périmètre affiché puis génère la synthèse de la date choisie, sans lancer de collecte (consomme des tokens LLM)"
           className="px-4 py-2 rounded text-sm font-medium transition disabled:opacity-50"
           style={{ backgroundColor: "var(--text)", color: "var(--bg)" }}
         >
-          {generating ? "Génération…" : "⚡ Générer la synthèse maintenant"}
+          {generating ? "Génération…" : "⚡ Générer la synthèse"}
         </button>
         {generateMsg && (
           <span className="text-sm font-medium"
@@ -251,7 +266,8 @@ export default function DailySynthesisSettings({ token }: { token: string }) {
           </span>
         )}
         {generateDone && (
-          <Link href="/admin/synthesis" className="text-sm font-medium hover:underline"
+          <Link href={`/admin/synthesis?date=${synthesisDate || todayISO()}`}
+            className="text-sm font-medium hover:underline"
             style={{ color: "var(--accent)" }}>
             Voir la synthèse →
           </Link>

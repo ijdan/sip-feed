@@ -116,12 +116,18 @@ def _add_usage(total: dict, usage: dict | None) -> dict:
 
 
 def run_synthesis(db, global_settings: dict, model_priority: list[str],
-                  new_articles: list[dict] | None = None) -> None:
+                  new_articles: list[dict] | None = None,
+                  target_date: str | None = None) -> None:
     """Génère la synthèse du jour et l'écrit dans `syntheses/{date}`.
 
     `new_articles` : articles ajoutés par le run en cours. Si la synthèse du
     jour existe déjà pour le même périmètre et qu'aucun nouvel article n'y
     entre, la génération est sautée (aucun token consommé).
+
+    `target_date` (YYYY-MM-DD, génération manuelle) : applique la logique
+    comme si le run avait eu lieu ce jour-là — corpus limité aux articles
+    collectés jusqu'à la fin du jour choisi, document écrit dans
+    `syntheses/{target_date}`.
     """
     interest = global_settings.get("interest", "").strip()
     if not interest:
@@ -130,7 +136,8 @@ def run_synthesis(db, global_settings: dict, model_priority: list[str],
     source_ids = global_settings.get("synthesis_source_ids") or []
     categories = global_settings.get("synthesis_categories") or []
     max_input_chars = int(global_settings.get("synthesis_max_input_chars") or MAX_SYNTHESIS_INPUT)
-    today_ref = db.collection("syntheses").document(date.today().isoformat())
+    synthesis_date = target_date or date.today().isoformat()
+    today_ref = db.collection("syntheses").document(synthesis_date)
 
     # Levier économie n°1 : ne pas régénérer si rien n'a changé depuis la
     # synthèse du jour (même centre d'intérêt, même périmètre, aucun nouvel
@@ -149,12 +156,16 @@ def run_synthesis(db, global_settings: dict, model_priority: list[str],
                             "aucun appel LLM.")
                 return
 
-    logger.info(f"Génération de la synthèse pour : «{interest}»...")
+    logger.info(f"Génération de la synthèse pour : «{interest}» (date : {synthesis_date})...")
     logger.info(f"Périmètre — sources : {', '.join(source_ids) if source_ids else 'toutes'} ; "
                 f"thèmes : {', '.join(categories) if categories else 'tous'} ; "
                 f"plafond prompt : {max_input_chars} caractères")
 
-    recent = db.collection("articles").order_by(
+    query = db.collection("articles")
+    if target_date:
+        # Corpus tel qu'il était à la fin du jour ciblé
+        query = query.where("collected_at", "<=", f"{target_date}T23:59:59.999999")
+    recent = query.order_by(
         "collected_at", direction="DESCENDING"
     ).limit(RECENT_ARTICLES_POOL).stream()
     # Filtrage en Python : Firestore n'autorise qu'un seul opérateur `in` par requête
@@ -217,6 +228,7 @@ def run_synthesis(db, global_settings: dict, model_priority: list[str],
 
     today_ref.set({
         "interest": interest,
+        "target_date": synthesis_date,
         "source_ids": source_ids,
         "categories": categories,
         "content": result["synthesis"],

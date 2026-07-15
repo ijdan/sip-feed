@@ -140,6 +140,7 @@ Bouton « ⚡ Générer la synthèse maintenant » en bas de la section « Synth
 - Le mode manuel **contourne le skip « rien de nouveau »** : un clic régénère toujours (`new_articles=None` dans `run_synthesis`).
 - Le clic persiste le périmètre en cours d'édition avant de générer — ce qu'on voit est ce qui est généré.
 - Centre d'intérêt vide → bloqué côté front avec message explicite ; l'endpoint répond de toute façon 400, aucun job lancé.
+- **Date de la synthèse** : champ date dans l'encart, défaut = aujourd'hui, futur interdit (contrôle front `max` + 400 backend). Une date passée applique la même logique **comme si le run avait eu lieu ce jour-là** : corpus = articles collectés jusqu'à la fin du jour choisi (`collected_at <= date T23:59:59`), document écrit dans `syntheses/{date}` (champ `target_date` persisté). La page Synthèse accepte `?date=YYYY-MM-DD` pour consulter cette date (bandeau explicite) et affiche « générée a posteriori le … » quand la génération est postérieure au jour de la synthèse.
 - Le bouton est désactivé pendant la génération (anti double-clic).
 - Le rapport de run (`reports/latest`) est aussi généré en mode manuel (traçabilité).
 - Chaque clic consomme un cycle LLM complet (sélection + synthèse) — mentionné dans le tooltip du bouton.

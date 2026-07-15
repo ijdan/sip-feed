@@ -3,6 +3,7 @@ logger = logging.getLogger(__name__)
 
 import os
 import subprocess
+from datetime import date
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -167,7 +168,8 @@ def purge_articles(_: dict = Depends(require_admin)):
     batch.commit()
 
 
-def _trigger_local(source_id: str | None = None, synthesis_only: bool = False) -> dict:
+def _trigger_local(source_id: str | None = None, synthesis_only: bool = False,
+                   synthesis_date: str | None = None) -> dict:
     """En local : lance le collector en sous-processus avec l'émulateur."""
     venv_python = COLLECTOR_DIR / "venv" / "bin" / "python"
     python = str(venv_python) if venv_python.exists() else "python3"
@@ -180,6 +182,8 @@ def _trigger_local(source_id: str | None = None, synthesis_only: bool = False) -
         env["COLLECTOR_SOURCE_ID"] = source_id
     if synthesis_only:
         env["COLLECTOR_SYNTHESIS_ONLY"] = "1"
+    if synthesis_date:
+        env["COLLECTOR_SYNTHESIS_DATE"] = synthesis_date
 
     import tempfile, pathlib
     log_file = pathlib.Path(tempfile.gettempdir()) / "collector_local.log"
@@ -194,7 +198,8 @@ def _trigger_local(source_id: str | None = None, synthesis_only: bool = False) -
     return {"status": "triggered_local", "source_id": source_id}
 
 
-def _trigger_job(source_id: str | None = None, synthesis_only: bool = False) -> dict:
+def _trigger_job(source_id: str | None = None, synthesis_only: bool = False,
+                 synthesis_date: str | None = None) -> dict:
     """Déclenche le Cloud Run Job, avec filtre source ou mode synthèse seule optionnels."""
     token = _get_access_token()
     env_vars = []
@@ -202,6 +207,8 @@ def _trigger_job(source_id: str | None = None, synthesis_only: bool = False) -> 
         env_vars.append({"name": "COLLECTOR_SOURCE_ID", "value": source_id})
     if synthesis_only:
         env_vars.append({"name": "COLLECTOR_SYNTHESIS_ONLY", "value": "1"})
+    if synthesis_date:
+        env_vars.append({"name": "COLLECTOR_SYNTHESIS_DATE", "value": synthesis_date})
     body: dict = {}
     if env_vars:
         body = {"overrides": {"containerOverrides": [{"env": env_vars}]}}
@@ -243,12 +250,26 @@ def collect_single_source(source_id: str, _: dict = Depends(require_admin)):
 
 
 @router.post("/synthesis/generate", status_code=202)
-def generate_synthesis_now(_: dict = Depends(require_admin)):
-    """Déclenche manuellement la génération de la synthèse du jour (mode synthèse seule).
+def generate_synthesis_now(date_: str | None = Query(None, alias="date"),
+                           _: dict = Depends(require_admin)):
+    """Déclenche manuellement la génération de la synthèse (mode synthèse seule).
 
     Le collector est lancé avec COLLECTOR_SYNTHESIS_ONLY=1 : aucune collecte,
     régénération forcée (le skip « rien de nouveau » est contourné).
+    `date` (YYYY-MM-DD, optionnelle) : applique la logique comme si le run
+    avait eu lieu ce jour-là et écrit dans syntheses/{date}.
     """
+    synthesis_date = None
+    if date_:
+        try:
+            parsed = date.fromisoformat(date_)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Date invalide — format attendu : YYYY-MM-DD.")
+        if parsed > date.today():
+            raise HTTPException(status_code=400, detail="La date ne peut pas être dans le futur.")
+        if parsed != date.today():
+            synthesis_date = parsed.isoformat()  # aujourd'hui = comportement par défaut
+
     db = get_db()
     doc = db.collection("settings").document("global").get()
     interest = (doc.to_dict() or {}).get("interest", "").strip() if doc.exists else ""
@@ -257,9 +278,9 @@ def generate_synthesis_now(_: dict = Depends(require_admin)):
                             detail="Aucun centre d'intérêt renseigné — synthèse désactivée.")
     if IS_LOCAL:
         _check_emulator_reachable()
-        return _trigger_local(synthesis_only=True)
+        return _trigger_local(synthesis_only=True, synthesis_date=synthesis_date)
     try:
-        return _trigger_job(synthesis_only=True)
+        return _trigger_job(synthesis_only=True, synthesis_date=synthesis_date)
     except httpx.RequestError as e:
         raise HTTPException(status_code=502, detail=str(e))
 
@@ -320,13 +341,24 @@ def get_stats(_: dict = Depends(require_admin)):
 
 
 @router.get("/syntheses")
-def get_syntheses(_: dict = Depends(require_admin)):
-    """Retourne les synthèses des 3 derniers jours avec les articles cités."""
-    from datetime import date, timedelta
+def get_syntheses(date_: str | None = Query(None, alias="date"),
+                  _: dict = Depends(require_admin)):
+    """Retourne les synthèses des 3 derniers jours avec les articles cités.
+
+    `date` (YYYY-MM-DD, optionnelle) : retourne uniquement la synthèse de ce
+    jour-là (consultation d'une date générée manuellement).
+    """
+    from datetime import timedelta
     db = get_db()
+    if date_:
+        try:
+            days = [date.fromisoformat(date_).isoformat()]
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Date invalide — format attendu : YYYY-MM-DD.")
+    else:
+        days = [(date.today() - timedelta(days=d)).isoformat() for d in range(3)]
     results = []
-    for days_back in range(3):
-        day = (date.today() - timedelta(days=days_back)).isoformat()
+    for day in days:
         doc = db.collection("syntheses").document(day).get()
         if not doc.exists:
             continue

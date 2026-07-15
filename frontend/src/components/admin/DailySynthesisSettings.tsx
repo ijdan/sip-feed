@@ -51,32 +51,74 @@ export default function DailySynthesisSettings({ token }: { token: string }) {
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState(false);
 
+  // Initialisation une seule fois : les re-fetch (mutate après auto-save)
+  // ne doivent pas écraser une saisie en cours (ex. centre d'intérêt).
+  const [initialized, setInitialized] = useState(false);
   useEffect(() => {
-    if (!settings) return;
+    if (!settings || initialized) return;
     setSourceIds(settings.synthesis_source_ids ?? []);
     setCategories(settings.synthesis_categories ?? []);
     setInterest(settings.interest ?? "");
     setMaxInputChars(settings.synthesis_max_input_chars ?? DEFAULT_MAX_INPUT);
     setDisplayCount(settings.synthesis_display_count ?? DEFAULT_DISPLAY_COUNT);
-  }, [settings]);
+    setInitialized(true);
+  }, [settings, initialized]);
 
-  const toggleSource = (id: string) =>
-    setSourceIds((prev) => prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id]);
-
-  const toggleCategory = (cat: string) =>
-    setCategories((prev) => prev.includes(cat) ? prev.filter((c) => c !== cat) : [...prev, cat]);
-
-  // Persiste la section telle qu'affichée (utilisé par Sauvegarder et par Générer)
-  const persist = async () => {
+  // Persiste la section telle qu'affichée. `override` porte la valeur fraîche
+  // du contrôle qui vient de changer (le setState React est asynchrone).
+  // Le centre d'intérêt n'est persisté que via Sauvegarder / Générer
+  // (includeInterest) pour ne jamais enregistrer une saisie à moitié tapée.
+  const persist = async (override: Partial<Settings> = {}, includeInterest = false) => {
     await api.admin.updateSettings(token, {
       ...settings,
-      interest,
+      ...(includeInterest ? { interest } : {}),
       synthesis_source_ids: sourceIds,
       synthesis_categories: categories,
       synthesis_max_input_chars: maxInputChars,
       synthesis_display_count: displayCount,
+      ...override,
     });
     mutate("admin-settings");
+  };
+
+  // Sauvegarde immédiate au changement (même comportement que les
+  // paramètres globaux), avec feedback ✓/✗.
+  const autoSave = async (override: Partial<Settings>) => {
+    if (!token || !settings) return;
+    setSaving(true);
+    setSaveError(false);
+    try {
+      await persist(override);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch {
+      setSaveError(true);
+      setTimeout(() => setSaveError(false), 3000);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const toggleSource = (id: string) => {
+    const next = sourceIds.includes(id) ? sourceIds.filter((s) => s !== id) : [...sourceIds, id];
+    setSourceIds(next);
+    autoSave({ synthesis_source_ids: next });
+  };
+
+  const toggleCategory = (cat: string) => {
+    const next = categories.includes(cat) ? categories.filter((c) => c !== cat) : [...categories, cat];
+    setCategories(next);
+    autoSave({ synthesis_categories: next });
+  };
+
+  const changeMaxInput = (n: number) => {
+    setMaxInputChars(n);
+    autoSave({ synthesis_max_input_chars: n });
+  };
+
+  const changeDisplayCount = (n: number) => {
+    setDisplayCount(n);
+    autoSave({ synthesis_display_count: n });
   };
 
   const save = async () => {
@@ -84,7 +126,7 @@ export default function DailySynthesisSettings({ token }: { token: string }) {
     setSaving(true);
     setSaveError(false);
     try {
-      await persist();
+      await persist({}, true);
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
     } catch {
@@ -111,7 +153,7 @@ export default function DailySynthesisSettings({ token }: { token: string }) {
       }
       // Sauvegarde le périmètre affiché pour que la génération l'utilise
       setGenerateMsg("Sauvegarde du périmètre…");
-      await persist();
+      await persist({}, true);
 
       const before = (await api.admin.syntheses(token, targetDate))?.syntheses?.[0]?.generated_at ?? null;
       await api.admin.generateSynthesis(token, targetDate);
@@ -204,7 +246,7 @@ export default function DailySynthesisSettings({ token }: { token: string }) {
         </div>
         <select
           value={maxInputChars}
-          onChange={(e) => setMaxInputChars(Number(e.target.value))}
+          onChange={(e) => changeMaxInput(Number(e.target.value))}
           disabled={saving}
           className="border rounded px-3 py-1 text-sm text-gray-700 bg-white disabled:opacity-50"
         >
@@ -226,7 +268,7 @@ export default function DailySynthesisSettings({ token }: { token: string }) {
         </div>
         <select
           value={displayCount}
-          onChange={(e) => setDisplayCount(Number(e.target.value))}
+          onChange={(e) => changeDisplayCount(Number(e.target.value))}
           disabled={saving}
           className="border rounded px-3 py-1 text-sm text-gray-700 bg-white disabled:opacity-50"
         >

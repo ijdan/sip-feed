@@ -79,9 +79,16 @@ def run():
     interest = global_settings.get("interest", "").strip()
     logger.info(f"Settings — LLM: {llm_enabled}, Thinking: {thinking_enabled}, Modèles: {model_priority}, Gmail lookback: {gmail_lookback_days}j, Rétention: {'illimitée' if retention_days == 0 else str(retention_days) + 'j'}")
 
+    # Mode synthèse seule (bouton « Générer maintenant » de l'admin) :
+    # aucune collecte, régénération forcée de la synthèse du jour.
+    synthesis_only = bool(os.environ.get("COLLECTOR_SYNTHESIS_ONLY"))
+
     # Si une source spécifique est demandée, ne traiter que celle-là
     specific_source_id = os.environ.get("COLLECTOR_SOURCE_ID")
-    if specific_source_id:
+    if synthesis_only:
+        logger.info("Mode synthèse seule — collecte ignorée (déclenchement manuel).")
+        all_sources = []
+    elif specific_source_id:
         doc = db.collection("sources").document(specific_source_id).get()
         all_sources = [doc] if doc.exists else []
         logger.info(f"Mode source unique : {specific_source_id}")
@@ -160,11 +167,16 @@ def run():
         apply_retention(retention_days)
 
     # Synthèse du jour — périmètre admin + contenu intégral (cf. processors/synthesis.py)
+    # En mode synthèse seule, new_articles=None désactive le skip « rien de
+    # nouveau » : un déclenchement manuel régénère toujours.
     if interest:
         try:
-            run_synthesis(db, global_settings, model_priority, new_articles=enriched_articles)
+            run_synthesis(db, global_settings, model_priority,
+                          new_articles=None if synthesis_only else enriched_articles)
         except Exception as e:
             logger.error(f"Erreur lors de la génération de la synthèse : {e}", exc_info=True)
+    elif synthesis_only:
+        logger.warning("Mode synthèse seule demandé mais centre d'intérêt vide — rien à générer.")
 
     # Rapport de synthèse via LLM — toujours généré
     run_logs = "\n".join(_mem_handler.records)

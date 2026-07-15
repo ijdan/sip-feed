@@ -167,7 +167,7 @@ def purge_articles(_: dict = Depends(require_admin)):
     batch.commit()
 
 
-def _trigger_local(source_id: str | None = None) -> dict:
+def _trigger_local(source_id: str | None = None, synthesis_only: bool = False) -> dict:
     """En local : lance le collector en sous-processus avec l'émulateur."""
     venv_python = COLLECTOR_DIR / "venv" / "bin" / "python"
     python = str(venv_python) if venv_python.exists() else "python3"
@@ -178,6 +178,8 @@ def _trigger_local(source_id: str | None = None) -> dict:
     }
     if source_id:
         env["COLLECTOR_SOURCE_ID"] = source_id
+    if synthesis_only:
+        env["COLLECTOR_SYNTHESIS_ONLY"] = "1"
 
     import tempfile, pathlib
     log_file = pathlib.Path(tempfile.gettempdir()) / "collector_local.log"
@@ -192,18 +194,17 @@ def _trigger_local(source_id: str | None = None) -> dict:
     return {"status": "triggered_local", "source_id": source_id}
 
 
-def _trigger_job(source_id: str | None = None) -> dict:
-    """Déclenche le Cloud Run Job, avec filtre source optionnel."""
+def _trigger_job(source_id: str | None = None, synthesis_only: bool = False) -> dict:
+    """Déclenche le Cloud Run Job, avec filtre source ou mode synthèse seule optionnels."""
     token = _get_access_token()
-    body: dict = {}
+    env_vars = []
     if source_id:
-        body = {
-            "overrides": {
-                "containerOverrides": [{
-                    "env": [{"name": "COLLECTOR_SOURCE_ID", "value": source_id}]
-                }]
-            }
-        }
+        env_vars.append({"name": "COLLECTOR_SOURCE_ID", "value": source_id})
+    if synthesis_only:
+        env_vars.append({"name": "COLLECTOR_SYNTHESIS_ONLY", "value": "1"})
+    body: dict = {}
+    if env_vars:
+        body = {"overrides": {"containerOverrides": [{"env": env_vars}]}}
     resp = httpx.post(
         CLOUD_RUN_JOB_URL,
         headers={"Authorization": f"Bearer {token}"},
@@ -237,6 +238,28 @@ def collect_single_source(source_id: str, _: dict = Depends(require_admin)):
         return _trigger_local(source_id=source_id)
     try:
         return _trigger_job(source_id=source_id)
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.post("/synthesis/generate", status_code=202)
+def generate_synthesis_now(_: dict = Depends(require_admin)):
+    """Déclenche manuellement la génération de la synthèse du jour (mode synthèse seule).
+
+    Le collector est lancé avec COLLECTOR_SYNTHESIS_ONLY=1 : aucune collecte,
+    régénération forcée (le skip « rien de nouveau » est contourné).
+    """
+    db = get_db()
+    doc = db.collection("settings").document("global").get()
+    interest = (doc.to_dict() or {}).get("interest", "").strip() if doc.exists else ""
+    if not interest:
+        raise HTTPException(status_code=400,
+                            detail="Aucun centre d'intérêt renseigné — synthèse désactivée.")
+    if IS_LOCAL:
+        _check_emulator_reachable()
+        return _trigger_local(synthesis_only=True)
+    try:
+        return _trigger_job(synthesis_only=True)
     except httpx.RequestError as e:
         raise HTTPException(status_code=502, detail=str(e))
 

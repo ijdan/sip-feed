@@ -127,6 +127,31 @@ Pour chaque article du corpus (US-SYN-102), le collector télécharge la page `a
 
 ---
 
+### US-SYN-105 — Générer manuellement la synthèse du jour
+
+**En tant qu'** admin,
+**je veux** déclencher la génération de la synthèse depuis la page `/admin/synthesis`,
+**afin de** voir immédiatement l'effet d'un changement de centre d'intérêt ou de périmètre, sans attendre le prochain run planifié.
+
+**Description fonctionnelle**
+Bouton « ⚡ Générer maintenant » dans l'en-tête de `/admin/synthesis`. Il appelle `POST /admin/synthesis/generate` (admin uniquement, 202), qui déclenche le Cloud Run Job collector avec `COLLECTOR_SYNTHESIS_ONLY=1` (en local : sous-processus vers l'émulateur). Dans ce mode, le collector saute entièrement la collecte (scraping, enrichissement) et régénère uniquement la synthèse. Le front re-interroge `GET /admin/syntheses` toutes les 10 s jusqu'à voir un `generated_at` plus récent (abandon avec message après 5 min).
+
+**Règles métier**
+- Le mode manuel **contourne le skip « rien de nouveau »** : un clic régénère toujours (`new_articles=None` dans `run_synthesis`).
+- Centre d'intérêt vide → l'endpoint répond 400 avec un message explicite, aucun job lancé.
+- Le bouton est désactivé pendant la génération (anti double-clic).
+- Le rapport de run (`reports/latest`) est aussi généré en mode manuel (traçabilité).
+- Chaque clic consomme un cycle LLM complet (sélection + synthèse) — mentionné dans le tooltip du bouton.
+
+**Critères d'acceptation**
+1. Le bouton est visible sur `/admin/synthesis` et déclenche l'endpoint.
+2. Pendant la génération : bouton désactivé, message « Génération en cours… ».
+3. À l'arrivée de la nouvelle synthèse, la card se met à jour sans rechargement et « ✓ Synthèse générée » s'affiche.
+4. Sans centre d'intérêt : message d'erreur explicite, pas de job lancé.
+5. Après 5 min sans nouvelle synthèse : message renvoyant vers le rapport de run.
+
+---
+
 ## Dépendances
 
 - Backend : `GET/PUT /admin/settings` (champs additifs `synthesis_source_ids`, `synthesis_categories`), `GET /admin/sources`, `GET /admin/syntheses`.

@@ -365,9 +365,15 @@ def get_syntheses(date_: str | None = Query(None, alias="date"),
         settings_doc = db.collection("settings").document("global").get()
         count = (settings_doc.to_dict() or {}).get("synthesis_display_count", 3) if settings_doc.exists else 3
         count = max(1, min(int(count or 3), 30))
-        docs = list(db.collection("syntheses").order_by(
-            "__name__", direction="DESCENDING"
-        ).limit(count).stream())
+        # Firestore refuse le tri descendant sur l'ID de document (« descending
+        # key scans ») : on liste les références (léger, 1 doc/jour), on trie
+        # les IDs en Python, puis on charge les N derniers en batch.
+        all_ids = [ref.id for ref in db.collection("syntheses").list_documents()]
+        latest_ids = sorted(all_ids, reverse=True)[:count]
+        snapshots = {s.id: s for s in db.get_all(
+            [db.collection("syntheses").document(i) for i in latest_ids]
+        ) if s.exists}
+        docs = [snapshots[i] for i in latest_ids if i in snapshots]
     results = []
     for doc in docs:
         if not doc.exists:

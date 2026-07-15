@@ -67,6 +67,8 @@ class GlobalSettings(BaseModel):
     synthesis_categories: list[str] = []
     # Volume max de texte (caractères) envoyé au LLM pour la synthèse
     synthesis_max_input_chars: int = 180_000
+    # Nombre de synthèses affichées sur la page /admin/synthesis
+    synthesis_display_count: int = 3
 
 
 def _get_access_token() -> str:
@@ -343,36 +345,45 @@ def get_stats(_: dict = Depends(require_admin)):
 @router.get("/syntheses")
 def get_syntheses(date_: str | None = Query(None, alias="date"),
                   _: dict = Depends(require_admin)):
-    """Retourne les synthèses des 3 derniers jours avec les articles cités.
+    """Retourne les N dernières synthèses existantes avec les articles cités.
 
+    N = `settings/global.synthesis_display_count` (défaut 3). Les IDs de la
+    collection `syntheses` étant des dates ISO, le tri sur l'ID décroissant
+    donne les plus récentes — y compris celles générées a posteriori pour
+    une date passée.
     `date` (YYYY-MM-DD, optionnelle) : retourne uniquement la synthèse de ce
-    jour-là (consultation d'une date générée manuellement).
+    jour-là (consultation d'une date précise).
     """
-    from datetime import timedelta
     db = get_db()
     if date_:
         try:
-            days = [date.fromisoformat(date_).isoformat()]
+            day_ids = [date.fromisoformat(date_).isoformat()]
         except ValueError:
             raise HTTPException(status_code=400, detail="Date invalide — format attendu : YYYY-MM-DD.")
+        docs = [db.collection("syntheses").document(d).get() for d in day_ids]
     else:
-        days = [(date.today() - timedelta(days=d)).isoformat() for d in range(3)]
+        settings_doc = db.collection("settings").document("global").get()
+        count = (settings_doc.to_dict() or {}).get("synthesis_display_count", 3) if settings_doc.exists else 3
+        count = max(1, min(int(count or 3), 30))
+        docs = list(db.collection("syntheses").order_by(
+            "__name__", direction="DESCENDING"
+        ).limit(count).stream())
     results = []
-    for day in days:
-        doc = db.collection("syntheses").document(day).get()
+    for doc in docs:
         if not doc.exists:
             continue
+        day = doc.id
         data = doc.to_dict()
         # C2 : batch fetch en un seul appel Firestore (évite N+1 queries)
         cited_ids = data.get("cited_ids", [])
         cited_articles = []
         if cited_ids:
             refs = [db.collection("articles").document(id) for id in cited_ids]
-            docs = db.get_all(refs)
+            article_docs = db.get_all(refs)
             # Résumés IA déjà générés (cache article_summaries), en batch également
             summary_refs = [db.collection("article_summaries").document(id) for id in cited_ids]
             ids_with_summary = {s.id for s in db.get_all(summary_refs) if s.exists}
-            for a_doc in docs:
+            for a_doc in article_docs:
                 if a_doc.exists:
                     a = a_doc.to_dict()
                     cited_articles.append({

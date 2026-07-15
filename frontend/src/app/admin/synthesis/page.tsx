@@ -181,7 +181,7 @@ export default function SynthesisPage() {
           </span>
           <button onClick={clearDateFilter}
             className="text-sm hover:underline" style={{ color: "var(--text-muted)" }}>
-            Voir les 3 derniers jours →
+            Voir les dernières synthèses →
           </button>
         </div>
       )}

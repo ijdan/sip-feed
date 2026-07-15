@@ -109,27 +109,50 @@ def test_build_corpus_truncates_and_falls_back(monkeypatch):
     assert "synthesis_content" not in corpus[2]
 
 
+def test_build_corpus_respects_configurable_max_input(monkeypatch):
+    """Le plafond configuré dans l'admin borne le budget par article."""
+    import processors.synthesis as synthesis
+
+    monkeypatch.setattr(synthesis, "fetch_article_text", lambda url: "x" * 50_000)
+    articles = [dict(a) for a in ARTICLES]
+    corpus = synthesis.build_corpus(articles, max_input_chars=3_000)
+
+    for a in corpus:
+        assert len(a["synthesis_content"]) <= 1_000  # 3 000 / 3 articles
+
+
 # ---------------------------------------------------------------------------
 # Prompt de synthèse (US-SYN-104)
 # ---------------------------------------------------------------------------
 
-def test_generate_synthesis_uses_full_content(monkeypatch):
-    """Le prompt contient le centre d'intérêt, le texte intégral quand présent,
-    et le résumé stocké en fallback."""
-    import processors.gemini_processor as gp
+class _FakeUsage:
+    prompt_token_count = 1000
+    candidates_token_count = 200
+    total_token_count = 1200
 
-    captured = {}
 
+def _fake_model(captured: dict, payload: dict):
+    """Fabrique un faux genai.GenerativeModel qui capture le prompt et renvoie payload."""
     class FakeModel:
         def __init__(self, model_name, generation_config=None):
             pass
         def generate_content(self, prompt):
             captured["prompt"] = prompt
             class R:
-                text = json.dumps({"synthesis": "**🔭 Vue d'ensemble** ok", "cited_ids": ["a1"]})
+                text = json.dumps(payload)
+                usage_metadata = _FakeUsage()
             return R()
+    return FakeModel
 
-    monkeypatch.setattr(gp.genai, "GenerativeModel", FakeModel)
+
+def test_generate_synthesis_uses_full_content(monkeypatch):
+    """Le prompt contient le centre d'intérêt, le texte intégral quand présent,
+    et le résumé stocké en fallback. La consommation de tokens est mesurée."""
+    import processors.gemini_processor as gp
+
+    captured = {}
+    monkeypatch.setattr(gp.genai, "GenerativeModel",
+                        _fake_model(captured, {"synthesis": "**🔭 Vue d'ensemble** ok", "cited_ids": ["a1"]}))
 
     articles = [dict(a) for a in ARTICLES[:2]]
     articles[0]["synthesis_content"] = "TEXTE_INTEGRAL_NETTOYE_A1"
@@ -139,6 +162,37 @@ def test_generate_synthesis_uses_full_content(monkeypatch):
     assert "SDLC à l'aune de l'IA" in captured["prompt"]
     assert "TEXTE_INTEGRAL_NETTOYE_A1" in captured["prompt"]      # texte intégral utilisé
     assert "Résumé stocké de a2." in captured["prompt"]           # fallback résumé
+    assert result["usage"] == {"prompt_tokens": 1000, "output_tokens": 200, "total_tokens": 1200}
+
+
+def test_generate_synthesis_respects_max_input_chars(monkeypatch):
+    """Le plafond configurable tronque le corpus dans le prompt."""
+    import processors.gemini_processor as gp
+
+    captured = {}
+    monkeypatch.setattr(gp.genai, "GenerativeModel",
+                        _fake_model(captured, {"synthesis": "ok", "cited_ids": []}))
+
+    articles = [{"id": "a1", "title_fr": "T", "synthesis_content": "y" * 100_000}]
+    gp.generate_synthesis(articles, "IA", ["fake-model"], max_input_chars=5_000)
+
+    assert captured["prompt"].count("y") <= 5_000
+
+
+def test_select_relevant_articles_parses_and_caps(monkeypatch):
+    """La pré-sélection renvoie les IDs retenus (plafonnés) et la consommation."""
+    import processors.gemini_processor as gp
+
+    captured = {}
+    monkeypatch.setattr(gp.genai, "GenerativeModel",
+                        _fake_model(captured, {"selected_ids": ["a1", "a3", "a2"]}))
+
+    result = gp.select_relevant_articles(ARTICLES, "IA", ["fake-model"], max_selected=2)
+
+    assert result["selected_ids"] == ["a1", "a3"]  # plafonné à 2
+    assert result["usage"]["total_tokens"] == 1200
+    assert "IA" in captured["prompt"]
+    assert "Résumé stocké de a1." in captured["prompt"]  # sélection sur résumés seulement
 
 
 # ---------------------------------------------------------------------------
@@ -152,10 +206,21 @@ class _FakeDoc:
         return self._data
 
 
+class _FakeSnapshot:
+    def __init__(self, data):
+        self._data = data
+    @property
+    def exists(self):
+        return self._data is not None
+    def to_dict(self):
+        return self._data
+
+
 class _FakeDb:
     """Simule le strict nécessaire de Firestore pour run_synthesis."""
-    def __init__(self, articles):
+    def __init__(self, articles, existing_syntheses: dict | None = None):
         self._articles = articles
+        self._existing = existing_syntheses or {}
         self.written: dict = {}
 
     def collection(self, name):
@@ -175,8 +240,25 @@ class _FakeDb:
         self._doc_id = doc_id
         return self
 
+    def get(self):
+        return _FakeSnapshot(self._existing.get(self._doc_id))
+
     def set(self, data):
         self.written[self._doc_id] = data
+
+
+_USAGE_STUB = {"prompt_tokens": 10, "output_tokens": 5, "total_tokens": 15}
+
+
+def _stub_synthesis(monkeypatch, synthesis, cited=None):
+    """Mock generate_synthesis + build_corpus avec les signatures actuelles."""
+    monkeypatch.setattr(synthesis, "build_corpus",
+                        lambda articles, max_input_chars=None: articles)
+    monkeypatch.setattr(
+        synthesis, "generate_synthesis",
+        lambda articles, interest, model_priority, max_input_chars=None:
+            {"synthesis": "ok", "cited_ids": cited or ["a1"], "usage": dict(_USAGE_STUB)},
+    )
 
 
 def test_run_synthesis_empty_perimeter_skips_llm(monkeypatch):
@@ -187,6 +269,7 @@ def test_run_synthesis_empty_perimeter_skips_llm(monkeypatch):
         raise AssertionError("le LLM ne doit pas être appelé sur un corpus vide")
 
     monkeypatch.setattr(synthesis, "generate_synthesis", _fail)
+    monkeypatch.setattr(synthesis, "select_relevant_articles", _fail)
     db = _FakeDb(ARTICLES)
     settings = {"interest": "IA", "synthesis_source_ids": ["source-inconnue"], "synthesis_categories": []}
 
@@ -196,17 +279,14 @@ def test_run_synthesis_empty_perimeter_skips_llm(monkeypatch):
     assert "Aucun article dans le périmètre" in doc["content"]
     assert doc["articles_count"] == 0
     assert doc["cited_ids"] == []
+    assert doc["usage"]["total_tokens"] == 0
 
 
 def test_run_synthesis_writes_perimeter(monkeypatch):
-    """Le document syntheses/{date} trace le périmètre utilisé (sources + thèmes)."""
+    """Le document syntheses/{date} trace le périmètre et la consommation."""
     import processors.synthesis as synthesis
 
-    monkeypatch.setattr(synthesis, "build_corpus", lambda articles: articles)
-    monkeypatch.setattr(
-        synthesis, "generate_synthesis",
-        lambda articles, interest, model_priority: {"synthesis": "ok", "cited_ids": ["a1"]},
-    )
+    _stub_synthesis(monkeypatch, synthesis)
     db = _FakeDb(ARTICLES)
     settings = {"interest": "IA", "synthesis_source_ids": ["tldr"], "synthesis_categories": ["IA", "Cloud"]}
 
@@ -216,7 +296,9 @@ def test_run_synthesis_writes_perimeter(monkeypatch):
     assert doc["source_ids"] == ["tldr"]
     assert doc["categories"] == ["IA", "Cloud"]
     assert doc["articles_count"] == 2  # a1 (IA) + a3 (Cloud), tous deux tldr
+    assert doc["perimeter_count"] == 2
     assert doc["content"] == "ok"
+    assert doc["usage"] == _USAGE_STUB  # corpus ≤ SELECTION_MIN_CORPUS : un seul appel
 
 
 def test_run_synthesis_no_interest_writes_nothing():
@@ -225,3 +307,169 @@ def test_run_synthesis_no_interest_writes_nothing():
     db = _FakeDb(ARTICLES)
     run_synthesis(db, {"interest": "  "}, ["fake-model"])
     assert db.written == {}
+
+
+# ---------------------------------------------------------------------------
+# Économie de tokens — skip si rien de nouveau (levier 1)
+# ---------------------------------------------------------------------------
+
+def _today():
+    from datetime import date
+    return date.today().isoformat()
+
+
+def test_run_synthesis_skips_when_up_to_date(monkeypatch):
+    """Synthèse du jour existante + même périmètre + aucun nouvel article
+    dans le périmètre → aucun appel LLM, aucune réécriture."""
+    import processors.synthesis as synthesis
+
+    def _fail(*args, **kwargs):
+        raise AssertionError("aucun appel LLM attendu quand la synthèse est à jour")
+
+    monkeypatch.setattr(synthesis, "generate_synthesis", _fail)
+    monkeypatch.setattr(synthesis, "select_relevant_articles", _fail)
+
+    existing = {_today(): {"interest": "IA", "source_ids": ["tldr"], "categories": []}}
+    db = _FakeDb(ARTICLES, existing_syntheses=existing)
+    settings = {"interest": "IA", "synthesis_source_ids": ["tldr"], "synthesis_categories": []}
+    hors_perimetre = [{"id": "n1", "source_id": "hn", "category": "Dev"}]
+
+    synthesis.run_synthesis(db, settings, ["fake-model"], new_articles=hors_perimetre)
+
+    assert db.written == {}
+
+
+def test_run_synthesis_regenerates_on_new_article_in_perimeter(monkeypatch):
+    """Un nouvel article dans le périmètre force la régénération."""
+    import processors.synthesis as synthesis
+
+    _stub_synthesis(monkeypatch, synthesis)
+    existing = {_today(): {"interest": "IA", "source_ids": ["tldr"], "categories": []}}
+    db = _FakeDb(ARTICLES, existing_syntheses=existing)
+    settings = {"interest": "IA", "synthesis_source_ids": ["tldr"], "synthesis_categories": []}
+    dans_perimetre = [{"id": "n1", "source_id": "tldr", "category": "IA"}]
+
+    synthesis.run_synthesis(db, settings, ["fake-model"], new_articles=dans_perimetre)
+
+    assert db.written  # régénérée
+
+
+def test_run_synthesis_retries_after_failed_synthesis(monkeypatch):
+    """Une synthèse du jour en échec (⚠️) est retentée même sans nouvel article."""
+    import processors.synthesis as synthesis
+
+    _stub_synthesis(monkeypatch, synthesis)
+    existing = {_today(): {"interest": "IA", "source_ids": [], "categories": [],
+                           "content": "⚠️ Synthèse indisponible — tous les modèles LLM ont échoué"}}
+    db = _FakeDb(ARTICLES, existing_syntheses=existing)
+    settings = {"interest": "IA", "synthesis_source_ids": [], "synthesis_categories": []}
+
+    synthesis.run_synthesis(db, settings, ["fake-model"], new_articles=[])
+
+    assert db.written  # retry effectué
+    assert next(iter(db.written.values()))["content"] == "ok"
+
+
+def test_run_synthesis_regenerates_on_scope_change(monkeypatch):
+    """Un changement de centre d'intérêt ou de périmètre force la régénération,
+    même sans nouvel article."""
+    import processors.synthesis as synthesis
+
+    _stub_synthesis(monkeypatch, synthesis)
+    existing = {_today(): {"interest": "Ancien sujet", "source_ids": [], "categories": []}}
+    db = _FakeDb(ARTICLES, existing_syntheses=existing)
+    settings = {"interest": "IA", "synthesis_source_ids": [], "synthesis_categories": []}
+
+    synthesis.run_synthesis(db, settings, ["fake-model"], new_articles=[])
+
+    assert db.written  # régénérée
+
+
+# ---------------------------------------------------------------------------
+# Économie de tokens — pré-sélection en deux étapes (levier 2)
+# ---------------------------------------------------------------------------
+
+def _large_corpus(n=12):
+    return [{"id": f"a{i}", "title_fr": f"Article {i}", "source_id": "tldr", "category": "IA",
+             "article_url": f"https://example.com/a{i}", "long_description_fr": f"Résumé {i}."}
+            for i in range(n)]
+
+
+def test_run_synthesis_two_stage_selection(monkeypatch):
+    """Gros corpus → pré-sélection sur résumés, contenu intégral uniquement
+    pour les articles retenus, consommation cumulée des deux appels."""
+    import processors.synthesis as synthesis
+
+    fetched = {}
+
+    def fake_build_corpus(articles, max_input_chars=None):
+        fetched["ids"] = [a["id"] for a in articles]
+        return articles
+
+    monkeypatch.setattr(synthesis, "build_corpus", fake_build_corpus)
+    monkeypatch.setattr(
+        synthesis, "select_relevant_articles",
+        lambda articles, interest, model_priority, max_selected:
+            {"selected_ids": ["a2", "a5"], "usage": {"prompt_tokens": 100, "output_tokens": 10, "total_tokens": 110}},
+    )
+    monkeypatch.setattr(
+        synthesis, "generate_synthesis",
+        lambda articles, interest, model_priority, max_input_chars=None:
+            {"synthesis": "ok", "cited_ids": ["a2"], "usage": {"prompt_tokens": 400, "output_tokens": 50, "total_tokens": 450}},
+    )
+    db = _FakeDb(_large_corpus())
+
+    synthesis.run_synthesis(db, {"interest": "IA"}, ["fake-model"])
+
+    doc = next(iter(db.written.values()))
+    assert fetched["ids"] == ["a2", "a5"]        # contenu intégral seulement pour la sélection
+    assert doc["articles_count"] == 2
+    assert doc["perimeter_count"] == 12
+    assert doc["usage"]["total_tokens"] == 560   # 110 (sélection) + 450 (synthèse)
+
+
+def test_run_synthesis_selection_failure_falls_back_to_summaries(monkeypatch):
+    """Pré-sélection indisponible → synthèse sur les résumés, sans téléchargement
+    de contenu intégral (coût borné)."""
+    import processors.synthesis as synthesis
+
+    def _no_fetch(*args, **kwargs):
+        raise AssertionError("pas de téléchargement de contenu intégral en mode dégradé")
+
+    monkeypatch.setattr(synthesis, "build_corpus", _no_fetch)
+    monkeypatch.setattr(synthesis, "select_relevant_articles", lambda *a, **k: None)
+
+    received = {}
+    monkeypatch.setattr(
+        synthesis, "generate_synthesis",
+        lambda articles, interest, model_priority, max_input_chars=None:
+            received.update(count=len(articles)) or {"synthesis": "ok", "cited_ids": [], "usage": dict(_USAGE_STUB)},
+    )
+    db = _FakeDb(_large_corpus())
+
+    synthesis.run_synthesis(db, {"interest": "IA"}, ["fake-model"])
+
+    assert received["count"] == 12  # tout le corpus, mais résumés seulement
+
+
+def test_run_synthesis_selection_empty_skips_second_call(monkeypatch):
+    """Pré-sélection sans article pertinent → pas de second appel LLM."""
+    import processors.synthesis as synthesis
+
+    def _fail(*args, **kwargs):
+        raise AssertionError("pas de synthèse quand aucun article n'est pertinent")
+
+    monkeypatch.setattr(synthesis, "generate_synthesis", _fail)
+    monkeypatch.setattr(synthesis, "build_corpus", _fail)
+    monkeypatch.setattr(
+        synthesis, "select_relevant_articles",
+        lambda *a, **k: {"selected_ids": [], "usage": {"prompt_tokens": 100, "output_tokens": 5, "total_tokens": 105}},
+    )
+    db = _FakeDb(_large_corpus())
+
+    synthesis.run_synthesis(db, {"interest": "IA"}, ["fake-model"])
+
+    doc = next(iter(db.written.values()))
+    assert "Aucun article du périmètre jugé pertinent" in doc["content"]
+    assert doc["articles_count"] == 0
+    assert doc["usage"]["total_tokens"] == 105  # seule la sélection a consommé

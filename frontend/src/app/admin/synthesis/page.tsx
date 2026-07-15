@@ -26,43 +26,6 @@ export default function SynthesisPage() {
     () => fetch(`${API}/admin/syntheses`, { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json())
   );
 
-  // Partage le même cache SWR que AdminSettings pour éviter les doublons
-  const { data: settingsData, mutate: mutateSettings } = useSWR(
-    token && role === "admin" ? "admin-settings" : null,
-    () => fetch(`${API}/admin/settings`, { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json())
-  );
-
-  const [interest, setInterest] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [saveError, setSaveError] = useState(false);
-
-  useEffect(() => {
-    if (settingsData?.interest !== undefined) setInterest(settingsData.interest);
-  }, [settingsData]);
-
-  const saveInterest = async () => {
-    if (!token || !settingsData) return; // attendre que les settings soient chargés
-    setSaving(true);
-    setSaveError(false);
-    try {
-      const res = await fetch(`${API}/admin/settings`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ ...settingsData, interest }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      mutateSettings();
-      setSaved(true);
-      setTimeout(() => setSaved(false), 3000);
-    } catch {
-      setSaveError(true);
-      setTimeout(() => setSaveError(false), 3000);
-    } finally {
-      setSaving(false);
-    }
-  };
-
   const { addFavorite } = usePreferences();
 
   const [modalArticle, setModalArticle] = useState<any>(null);
@@ -190,47 +153,12 @@ export default function SynthesisPage() {
         </button>
       </div>
 
-      {/* Centre d'intérêt */}
-      <div className="rounded-xl border p-5 space-y-3"
-        style={{ backgroundColor: "var(--surface)", borderColor: "var(--border)" }}>
-        <div>
-          <label className="block text-sm font-medium mb-1" style={{ color: "var(--text)" }}>
-            🎯 Centre d'intérêt
-          </label>
-          <p className="text-xs mb-2" style={{ color: "var(--text-muted)" }}>
-            Après chaque collecte, le LLM produira une synthèse ciblée sur ce sujet.
-            Laisser vide pour désactiver.
-          </p>
-          <div className="flex gap-2">
-            <input
-              value={interest}
-              onChange={(e) => setInterest(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && saveInterest()}
-              placeholder="Ex: SDLC à l'aune de l'IA"
-              className="flex-1 border rounded px-3 py-2 text-sm"
-              style={{ backgroundColor: "var(--surface-2)", borderColor: "var(--border)", color: "var(--text)" }}
-            />
-            <button
-              onClick={saveInterest}
-              disabled={saving || !settingsData}
-              title={!settingsData ? "Chargement des paramètres…" : undefined}
-              className="px-4 py-2 rounded text-sm font-medium transition disabled:opacity-50"
-              style={{ backgroundColor: "var(--text)", color: "var(--bg)" }}
-            >
-              {saving ? "…" : !settingsData ? "Chargement…" : "Sauvegarder"}
-            </button>
-            {saved && <span className="text-sm font-medium" style={{ color: "#22c55e" }}>✓ Sauvegardé</span>}
-            {saveError && <span className="text-sm font-medium" style={{ color: "#ef4444" }}>✗ Erreur</span>}
-          </div>
-        </div>
-      </div>
-
       {syntheses.length === 0 ? (
         <div className="rounded-xl border p-8 text-center"
           style={{ backgroundColor: "var(--surface)", borderColor: "var(--border)" }}>
           <p className="text-lg mb-2" style={{ color: "var(--text)" }}>Aucune synthèse disponible</p>
           <p className="text-sm" style={{ color: "var(--text-muted)" }}>
-            Renseignez un centre d'intérêt dans les paramètres admin et lancez une collecte.
+            Renseignez un centre d'intérêt dans la section « Synthèse du jour » de la console admin et lancez une collecte.
           </p>
         </div>
       ) : (

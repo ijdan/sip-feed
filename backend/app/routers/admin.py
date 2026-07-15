@@ -61,6 +61,9 @@ class GlobalSettings(BaseModel):
     gmail_lookback_days: int = 1
     retention_days: int = 0
     interest: str = ""
+    # Périmètre de la synthèse du jour — liste vide = aucune restriction
+    synthesis_source_ids: list[str] = []
+    synthesis_categories: list[str] = []
 
 
 def _get_access_token() -> str:

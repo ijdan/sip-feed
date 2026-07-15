@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import useSWR, { mutate } from "swr";
+import Link from "next/link";
 import { api } from "@/lib/api";
 import { CATEGORIES } from "@/lib/categories";
 
@@ -58,19 +59,24 @@ export default function DailySynthesisSettings({ token }: { token: string }) {
   const toggleCategory = (cat: string) =>
     setCategories((prev) => prev.includes(cat) ? prev.filter((c) => c !== cat) : [...prev, cat]);
 
+  // Persiste la section telle qu'affichée (utilisé par Sauvegarder et par Générer)
+  const persist = async () => {
+    await api.admin.updateSettings(token, {
+      ...settings,
+      interest,
+      synthesis_source_ids: sourceIds,
+      synthesis_categories: categories,
+      synthesis_max_input_chars: maxInputChars,
+    });
+    mutate("admin-settings");
+  };
+
   const save = async () => {
     if (!token || !settings) return; // attendre que les settings soient chargés
     setSaving(true);
     setSaveError(false);
     try {
-      await api.admin.updateSettings(token, {
-        ...settings,
-        interest,
-        synthesis_source_ids: sourceIds,
-        synthesis_categories: categories,
-        synthesis_max_input_chars: maxInputChars,
-      });
-      mutate("admin-settings");
+      await persist();
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
     } catch {
@@ -78,6 +84,56 @@ export default function DailySynthesisSettings({ token }: { token: string }) {
       setTimeout(() => setSaveError(false), 3000);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const [generating, setGenerating] = useState(false);
+  const [generateMsg, setGenerateMsg] = useState("");
+  const [generateDone, setGenerateDone] = useState(false);
+
+  const launchGeneration = async () => {
+    if (!token || !settings || generating) return;
+    setGenerating(true);
+    setGenerateDone(false);
+    try {
+      if (!interest.trim()) {
+        throw new Error("Renseignez un centre d'intérêt avant de générer.");
+      }
+      // Sauvegarde le périmètre affiché pour que la génération l'utilise
+      setGenerateMsg("Sauvegarde du périmètre…");
+      await persist();
+
+      const before = (await api.admin.syntheses(token))?.syntheses?.[0]?.generated_at ?? null;
+      await api.admin.generateSynthesis(token);
+      setGenerateMsg("Génération en cours… (~1 à 2 min)");
+
+      // Le job est asynchrone : on re-interroge jusqu'à voir une synthèse
+      // plus récente (toutes les 10 s, abandon après 5 min).
+      const startedAt = Date.now();
+      const poll = async () => {
+        try {
+          const fresh = await api.admin.syntheses(token);
+          const latest = fresh?.syntheses?.[0]?.generated_at ?? null;
+          if (latest && latest !== before) {
+            setGenerating(false);
+            setGenerateDone(true);
+            setGenerateMsg("✓ Synthèse générée");
+            return;
+          }
+        } catch { /* erreur réseau transitoire : on retentera au tick suivant */ }
+        if (Date.now() - startedAt > 5 * 60_000) {
+          setGenerating(false);
+          setGenerateMsg("⚠️ Pas de nouvelle synthèse après 5 min — consultez le rapport de run.");
+          setTimeout(() => setGenerateMsg(""), 8000);
+          return;
+        }
+        setTimeout(poll, 10_000);
+      };
+      setTimeout(poll, 10_000);
+    } catch (err: any) {
+      setGenerating(false);
+      setGenerateMsg(`✗ ${err.message || "Erreur lors du déclenchement"}`);
+      setTimeout(() => setGenerateMsg(""), 6000);
     }
   };
 
@@ -173,6 +229,33 @@ export default function DailySynthesisSettings({ token }: { token: string }) {
           {saved && <span className="text-sm font-medium self-center" style={{ color: "#22c55e" }}>✓ Sauvegardé</span>}
           {saveError && <span className="text-sm font-medium self-center" style={{ color: "#ef4444" }}>✗ Erreur</span>}
         </div>
+      </div>
+
+      {/* Génération manuelle */}
+      <div className="border-t pt-4 flex items-center gap-3 flex-wrap">
+        <button
+          onClick={launchGeneration}
+          disabled={generating || !settings}
+          title="Sauvegarde le périmètre affiché puis régénère la synthèse du jour, sans lancer de collecte (consomme des tokens LLM)"
+          className="px-4 py-2 rounded text-sm font-medium transition disabled:opacity-50"
+          style={{ backgroundColor: "var(--text)", color: "var(--bg)" }}
+        >
+          {generating ? "Génération…" : "⚡ Générer la synthèse maintenant"}
+        </button>
+        {generateMsg && (
+          <span className="text-sm font-medium"
+            style={{ color: generateMsg.startsWith("✓") ? "#22c55e"
+              : generateMsg.startsWith("✗") ? "#ef4444" : "var(--text-muted)" }}>
+            {generating && <span className="inline-block animate-spin mr-1">⟳</span>}
+            {generateMsg}
+          </span>
+        )}
+        {generateDone && (
+          <Link href="/admin/synthesis" className="text-sm font-medium hover:underline"
+            style={{ color: "var(--accent)" }}>
+            Voir la synthèse →
+          </Link>
+        )}
       </div>
     </div>
   );

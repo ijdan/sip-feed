@@ -28,51 +28,6 @@ export default function SynthesisPage() {
 
   const { addFavorite } = usePreferences();
 
-  const [generating, setGenerating] = useState(false);
-  const [generateMsg, setGenerateMsg] = useState("");
-
-  const launchGeneration = async () => {
-    if (!token || generating) return;
-    setGenerating(true);
-    setGenerateMsg("Génération en cours… (~1 à 2 min)");
-    const previousLatest = data?.syntheses?.[0]?.generated_at ?? null;
-    try {
-      const res = await fetch(`${API}/admin/synthesis/generate`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) {
-        const detail = (await res.json().catch(() => null))?.detail;
-        throw new Error(detail || `HTTP ${res.status}`);
-      }
-      // Le job est asynchrone : on re-interroge jusqu'à voir une synthèse
-      // plus récente (toutes les 10 s, abandon après 5 min).
-      const startedAt = Date.now();
-      const poll = async () => {
-        const fresh = await mutate();
-        const latest = fresh?.syntheses?.[0]?.generated_at ?? null;
-        if (latest && latest !== previousLatest) {
-          setGenerating(false);
-          setGenerateMsg("✓ Synthèse générée");
-          setTimeout(() => setGenerateMsg(""), 4000);
-          return;
-        }
-        if (Date.now() - startedAt > 5 * 60_000) {
-          setGenerating(false);
-          setGenerateMsg("⚠️ Pas de nouvelle synthèse après 5 min — consultez le rapport de run.");
-          setTimeout(() => setGenerateMsg(""), 8000);
-          return;
-        }
-        setTimeout(poll, 10_000);
-      };
-      setTimeout(poll, 10_000);
-    } catch (err: any) {
-      setGenerating(false);
-      setGenerateMsg(`✗ ${err.message || "Erreur lors du déclenchement"}`);
-      setTimeout(() => setGenerateMsg(""), 6000);
-    }
-  };
-
   const [modalArticle, setModalArticle] = useState<any>(null);
   const [modalCopied, setModalCopied] = useState(false);
   const modalRef = useRef<HTMLDivElement>(null);
@@ -189,32 +144,13 @@ export default function SynthesisPage() {
           onClose={() => setSummaryOpen(false)}
         />
       )}
-      <div className="flex items-center justify-between gap-4 flex-wrap">
+      <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold" style={{ color: "var(--text)" }}>Synthèse</h1>
-        <div className="flex items-center gap-3 flex-wrap">
-          {generateMsg && (
-            <span className="text-sm font-medium"
-              style={{ color: generateMsg.startsWith("✓") ? "#22c55e"
-                : generateMsg.startsWith("✗") ? "#ef4444" : "var(--text-muted)" }}>
-              {generating && <span className="inline-block animate-spin mr-1">⟳</span>}
-              {generateMsg}
-            </span>
-          )}
-          <button
-            onClick={launchGeneration}
-            disabled={generating}
-            title="Régénère la synthèse du jour sans lancer de collecte (consomme des tokens LLM)"
-            className="px-4 py-2 rounded text-sm font-medium transition disabled:opacity-50"
-            style={{ backgroundColor: "var(--text)", color: "var(--bg)" }}
-          >
-            {generating ? "Génération…" : "⚡ Générer maintenant"}
-          </button>
-          <button onClick={() => mutate()}
-            className="text-sm hover:underline"
-            style={{ color: "var(--text-muted)" }}>
-            Rafraîchir
-          </button>
-        </div>
+        <button onClick={() => mutate()}
+          className="text-sm hover:underline"
+          style={{ color: "var(--text-muted)" }}>
+          Rafraîchir
+        </button>
       </div>
 
       {syntheses.length === 0 ? (

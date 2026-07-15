@@ -70,6 +70,8 @@ export const api = {
       apiFetch("/admin/settings", token, { method: "PUT", body: JSON.stringify(body) }),
     report: (token: string) => apiFetch("/admin/report", token),
     syntheses: (token: string) => apiFetch("/admin/syntheses", token),
+    generateSynthesis: (token: string) =>
+      apiFetch("/admin/synthesis/generate", token, { method: "POST" }),
     stats: (token: string) => apiFetch("/admin/stats", token),
     logs: (token: string) => apiFetch("/admin/logs", token),
     collect: (token: string) =>

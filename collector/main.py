@@ -164,7 +164,7 @@ def run():
         try:
             run_synthesis(db, global_settings, model_priority, new_articles=enriched_articles)
         except Exception as e:
-            logger.error(f"Erreur lors de la génération de la synthèse : {e}")
+            logger.error(f"Erreur lors de la génération de la synthèse : {e}", exc_info=True)
 
     # Rapport de synthèse via LLM — toujours généré
     run_logs = "\n".join(_mem_handler.records)

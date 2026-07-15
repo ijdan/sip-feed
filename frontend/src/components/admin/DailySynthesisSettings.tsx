@@ -15,10 +15,13 @@ interface Settings {
   synthesis_source_ids: string[];
   synthesis_categories: string[];
   synthesis_max_input_chars: number;
+  synthesis_display_count: number;
 }
 
 const MAX_INPUT_OPTIONS = [30_000, 60_000, 120_000, 180_000, 250_000];
 const DEFAULT_MAX_INPUT = 180_000;
+const DISPLAY_COUNT_OPTIONS = [3, 5, 10, 15, 30];
+const DEFAULT_DISPLAY_COUNT = 3;
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
@@ -43,6 +46,7 @@ export default function DailySynthesisSettings({ token }: { token: string }) {
   const [categories, setCategories] = useState<string[]>([]);
   const [interest, setInterest] = useState("");
   const [maxInputChars, setMaxInputChars] = useState(DEFAULT_MAX_INPUT);
+  const [displayCount, setDisplayCount] = useState(DEFAULT_DISPLAY_COUNT);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState(false);
@@ -53,6 +57,7 @@ export default function DailySynthesisSettings({ token }: { token: string }) {
     setCategories(settings.synthesis_categories ?? []);
     setInterest(settings.interest ?? "");
     setMaxInputChars(settings.synthesis_max_input_chars ?? DEFAULT_MAX_INPUT);
+    setDisplayCount(settings.synthesis_display_count ?? DEFAULT_DISPLAY_COUNT);
   }, [settings]);
 
   const toggleSource = (id: string) =>
@@ -69,6 +74,7 @@ export default function DailySynthesisSettings({ token }: { token: string }) {
       synthesis_source_ids: sourceIds,
       synthesis_categories: categories,
       synthesis_max_input_chars: maxInputChars,
+      synthesis_display_count: displayCount,
     });
     mutate("admin-settings");
   };
@@ -206,6 +212,26 @@ export default function DailySynthesisSettings({ token }: { token: string }) {
             <option key={n} value={n}>
               {n.toLocaleString("fr-FR")} caractères
             </option>
+          ))}
+        </select>
+      </div>
+
+      {/* Nombre de synthèses affichées */}
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <p className="text-sm font-medium text-gray-700">Synthèses affichées</p>
+          <p className="text-xs text-gray-400">
+            Nombre de synthèses (les plus récentes, y compris générées a posteriori) listées sur la page Synthèse.
+          </p>
+        </div>
+        <select
+          value={displayCount}
+          onChange={(e) => setDisplayCount(Number(e.target.value))}
+          disabled={saving}
+          className="border rounded px-3 py-1 text-sm text-gray-700 bg-white disabled:opacity-50"
+        >
+          {DISPLAY_COUNT_OPTIONS.map((n) => (
+            <option key={n} value={n}>{n}</option>
           ))}
         </select>
       </div>

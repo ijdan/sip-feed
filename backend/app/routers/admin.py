@@ -337,6 +337,9 @@ def get_syntheses(_: dict = Depends(require_admin)):
         if cited_ids:
             refs = [db.collection("articles").document(id) for id in cited_ids]
             docs = db.get_all(refs)
+            # Résumés IA déjà générés (cache article_summaries), en batch également
+            summary_refs = [db.collection("article_summaries").document(id) for id in cited_ids]
+            ids_with_summary = {s.id for s in db.get_all(summary_refs) if s.exists}
             for a_doc in docs:
                 if a_doc.exists:
                     a = a_doc.to_dict()
@@ -350,6 +353,7 @@ def get_syntheses(_: dict = Depends(require_admin)):
                         "long_description_en": a.get("long_description_en", ""),
                         "article_url": a.get("article_url", ""),
                         "source_name": a.get("source_name", ""),
+                        "has_summary": a_doc.id in ids_with_summary,
                     })
         results.append({"date": day, **data, "cited_articles": cited_articles})
     return {"syntheses": results}

@@ -1,5 +1,6 @@
 """Tests fonctionnels — endpoint POST /articles/{article_id}/summary."""
 import json
+import os
 import sys
 import pytest
 import httpx
@@ -62,6 +63,116 @@ def test_summary_article_not_found(admin_token):
             if line.startswith("data: "):
                 events.append(json.loads(line[6:]))
     assert any(e["type"] == "error" and e.get("status") == 404 for e in events)
+
+
+# ─── Régénération forcée (?force=true) ───────────────────────────────────────
+
+def _import_articles_router():
+    """Importe app.routers.articles — app.config.Settings exige ces variables
+    d'environnement au premier import ; on fournit des valeurs factices si absentes."""
+    for key in (
+        "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET",
+        "JWT_SECRET", "FIRESTORE_PROJECT_ID", "GEMINI_API_KEY",
+    ):
+        os.environ.setdefault(key, "test")
+    from app.routers import articles
+    return articles
+
+
+def _mock_summary_db(cached_summary: dict, article: dict):
+    """Base Firestore mockée : un résumé en cache + l'article correspondant."""
+    summary_doc = MagicMock()
+    summary_doc.exists = True
+    summary_doc.to_dict = MagicMock(return_value=cached_summary)
+    summary_ref = MagicMock()
+    summary_ref.get = MagicMock(return_value=summary_doc)
+
+    article_doc = MagicMock()
+    article_doc.exists = True
+    article_doc.to_dict = MagicMock(return_value=article)
+    article_ref = MagicMock()
+    article_ref.get = MagicMock(return_value=article_doc)
+
+    def collection(name):
+        col = MagicMock()
+        col.document = MagicMock(
+            return_value=summary_ref if name == "article_summaries" else article_ref
+        )
+        return col
+
+    mock_db = MagicMock()
+    mock_db.collection = MagicMock(side_effect=collection)
+    return mock_db, summary_ref
+
+
+def _collect_stream_events(article_id: str, force: bool):
+    """Exécute _summary_event_stream et retourne les événements SSE parsés."""
+    import asyncio
+    articles_router = _import_articles_router()
+
+    async def run():
+        events = []
+        async for chunk in articles_router._summary_event_stream(article_id, "test", force=force):
+            events.append(json.loads(chunk[6:].strip()))
+        return events
+
+    return asyncio.run(run())
+
+
+_CACHED_SUMMARY = {
+    "article_id": "art-1",
+    "article_url": "https://example.com/a",
+    "summary_fr": "Ancien résumé FR",
+    "summary_en": "Old EN summary",
+    "model_used": "gemini-old",
+    "generated_at": "2026-01-01T00:00:00+00:00",
+    "word_count_fr": 3,
+    "word_count_en": 3,
+    "prompt_version": "linkedin-v-test",
+}
+
+_ARTICLE = {"article_url": "https://example.com/a", "title": "T", "source_name": "S"}
+
+
+def test_summary_stream_returns_cache_without_force():
+    """Sans force, un résumé en cache est restitué tel quel (cached=True), sans LLM."""
+    _import_articles_router()
+    mock_db, _ = _mock_summary_db(_CACHED_SUMMARY, _ARTICLE)
+
+    with patch("app.routers.articles.get_db", return_value=mock_db), \
+         patch("app.routers.articles.get_summary_prompt", return_value=("prompt", "linkedin-v-test")), \
+         patch("app.routers.articles.fetch_article_text", new=AsyncMock()) as mock_fetch:
+        events = _collect_stream_events("art-1", force=False)
+
+    result = next(e for e in events if e["type"] == "result")
+    assert result["data"]["cached"] is True
+    assert result["data"]["summary_fr"] == "Ancien résumé FR"
+    mock_fetch.assert_not_called()
+
+
+def test_summary_stream_force_regenerates_despite_cache():
+    """Avec force=True, le cache est ignoré : nouveau scraping + LLM, cached=False."""
+    _import_articles_router()
+    mock_db, summary_ref = _mock_summary_db(_CACHED_SUMMARY, _ARTICLE)
+
+    with patch("app.routers.articles.get_db", return_value=mock_db), \
+         patch("app.routers.articles.get_summary_prompt", return_value=("prompt", "linkedin-v-test")), \
+         patch("app.routers.articles.fetch_article_text", new=AsyncMock(return_value="texte article")), \
+         patch("app.routers.articles.get_model_priority", return_value=["modele-a"]), \
+         patch(
+             "app.routers.articles._sync_call_llm_with_progress",
+             return_value=("Nouveau résumé FR", "New EN summary", "modele-a"),
+         ), \
+         patch("app.routers.articles._log_summary_stat", new=AsyncMock()):
+        events = _collect_stream_events("art-1", force=True)
+
+    # Le cache n'a jamais été lu
+    summary_ref.get.assert_not_called()
+    result = next(e for e in events if e["type"] == "result")
+    assert result["data"]["cached"] is False
+    assert result["data"]["summary_fr"] == "Nouveau résumé FR"
+    # Le nouveau résumé écrase l'ancien en Firestore
+    summary_ref.set.assert_called_once()
 
 
 # ─── Modèle ArticleSummary ───────────────────────────────────────────────────

@@ -127,9 +127,13 @@ def get_article(article_id: str):
 @router.post("/{article_id}/summary")
 async def article_summary(
     article_id: str,
+    force: bool = Query(False, description="Ignore le cache et régénère un nouveau résumé"),
     current_user: dict = Depends(require_admin),
 ):
     """Génère (ou restitue) un résumé long-form en streaming SSE.
+
+    Avec ?force=true, le cache Firestore est ignoré et un nouveau résumé
+    est généré (utile quand le résumé existant est de mauvaise qualité).
 
     Événements émis :
       {"type": "progress", "message": "..."}  — étape en cours
@@ -138,13 +142,13 @@ async def article_summary(
     """
     identifier = current_user.get("email", "admin")
     return StreamingResponse(
-        _summary_event_stream(article_id, identifier),
+        _summary_event_stream(article_id, identifier, force=force),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 
-async def _summary_event_stream(article_id: str, identifier: str):
+async def _summary_event_stream(article_id: str, identifier: str, force: bool = False):
     """Générateur async SSE pour la génération de résumé."""
 
     def sse(event_type: str, **kwargs) -> str:
@@ -155,17 +159,20 @@ async def _summary_event_stream(article_id: str, identifier: str):
     # Prompt actif (personnalisé via l'admin, ou défaut du code) et sa version
     prompt_template, prompt_version = get_summary_prompt(db)
 
-    # ── Cache Firestore ────────────────────────────────────────────────────────
-    yield sse("progress", message="Recherche en base…")
+    # ── Cache Firestore (court-circuité si régénération forcée) ────────────────
     summary_ref = db.collection("article_summaries").document(article_id)
-    summary_doc = summary_ref.get()
-    if summary_doc.exists:
-        cached = summary_doc.to_dict()
-        if cached.get("prompt_version") == prompt_version:
-            yield sse("progress", message="Résumé trouvé en base — restitution immédiate.")
-            yield sse("result", data={**cached, "cached": True})
-            return
-        yield sse("progress", message="Résumé obsolète — régénération avec le nouveau format…")
+    if force:
+        yield sse("progress", message="Régénération demandée — le résumé existant est ignoré…")
+    else:
+        yield sse("progress", message="Recherche en base…")
+        summary_doc = summary_ref.get()
+        if summary_doc.exists:
+            cached = summary_doc.to_dict()
+            if cached.get("prompt_version") == prompt_version:
+                yield sse("progress", message="Résumé trouvé en base — restitution immédiate.")
+                yield sse("result", data={**cached, "cached": True})
+                return
+            yield sse("progress", message="Résumé obsolète — régénération avec le nouveau format…")
 
     # ── Récupération de l'article ──────────────────────────────────────────────
     article_doc = db.collection("articles").document(article_id).get()

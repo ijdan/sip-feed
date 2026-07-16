@@ -77,13 +77,14 @@ export default function FeedPage() {
     setLang(l); // session uniquement — ne modifie pas settings.default_lang
   };
 
-  const handleSummarize = async (article: any) => {
+  const handleSummarize = async (article: any, force = false) => {
     if (!token) return;
-    // Résumé déjà en cache local → ouvrir directement
-    if (summaryData && summaryArticleId === article.id) {
+    // Résumé déjà en cache local → ouvrir directement (sauf régénération forcée)
+    if (!force && summaryData && summaryArticleId === article.id) {
       setSummaryOpen(true);
       return;
     }
+    setSummaryOpen(false);
     setSummaryLoading(true);
     setSummaryProgressMsg("Initialisation…");
     setSummaryError("");
@@ -93,7 +94,7 @@ export default function FeedPage() {
     setSummaryArticleId(null);
     try {
       const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/articles/${article.id}/summary`,
+        `${process.env.NEXT_PUBLIC_API_URL}/articles/${article.id}/summary${force ? "?force=true" : ""}`,
         { method: "POST", headers: { Authorization: `Bearer ${token}` } }
       );
       if (!res.ok || !res.body) {
@@ -263,6 +264,7 @@ export default function FeedPage() {
           data={summaryData}
           initialLang={lang}
           onClose={() => setSummaryOpen(false)}
+          onRegenerate={() => summaryArticleId && handleSummarize({ id: summaryArticleId }, true)}
         />
       )}
 

@@ -6,9 +6,10 @@ interface Props {
   data: ArticleSummary;
   initialLang: "fr" | "en";
   onClose: () => void;
+  onRegenerate?: () => void;
 }
 
-export default function SummaryLayer({ data, initialLang, onClose }: Props) {
+export default function SummaryLayer({ data, initialLang, onClose, onRegenerate }: Props) {
   const [lang, setLang] = useState<"fr" | "en">(initialLang);
   const [copiedText, setCopiedText] = useState(false);
   const [copiedUrl, setCopiedUrl] = useState(false);
@@ -96,6 +97,22 @@ export default function SummaryLayer({ data, initialLang, onClose }: Props) {
                 </button>
               ))}
             </div>
+
+            {/* Régénérer — visible dès qu'un résumé existe (la popin n'affiche que des résumés générés) */}
+            {onRegenerate && (
+              <button
+                onClick={onRegenerate}
+                title={lang === "en" ? "Regenerate summary" : "Régénérer le résumé"}
+                className="px-3 py-1 text-sm rounded-md border transition"
+                style={{
+                  borderColor: "var(--border)",
+                  backgroundColor: "var(--surface-2)",
+                  color: "var(--text-muted)",
+                }}
+              >
+                🔄
+              </button>
+            )}
 
             <button
               onClick={handleCopyText}

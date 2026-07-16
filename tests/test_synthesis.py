@@ -80,6 +80,46 @@ def test_extract_text_strips_html_css_scripts_images():
         assert interdit not in text
 
 
+def test_resolve_article_url_unwraps_tldr_tracking():
+    """Un lien de tracking TLDR est déballé vers l'URL réelle de l'article."""
+    from processors.synthesis import resolve_article_url
+    tracking = ("https://tracking.tldrnewsletter.com/CL0/"
+                "https:%2F%2Fexample.com%2Fpost%3Futm_source%3Dtldrnewsletter"
+                "/1/010001/abcdef=123")
+    assert resolve_article_url(tracking) == "https://example.com/post?utm_source=tldrnewsletter"
+
+
+def test_resolve_article_url_passthrough():
+    """Une URL directe (source web) ou un lien de tracking illisible restent inchangés."""
+    from processors.synthesis import resolve_article_url
+    assert resolve_article_url("https://example.com/article") == "https://example.com/article"
+    assert (resolve_article_url("https://tracking.tldrnewsletter.com/CL0/pas-une-url/1/x")
+            == "https://tracking.tldrnewsletter.com/CL0/pas-une-url/1/x")
+
+
+def test_fetch_article_text_uses_real_url(monkeypatch):
+    """Le téléchargement du contenu interroge l'URL réelle, pas le redirecteur."""
+    import processors.synthesis as synthesis
+
+    requested = {}
+
+    def fake_get(url, **kwargs):
+        requested["url"] = url
+        class R:
+            headers = {"content-type": "text/html"}
+            text = "<p>" + "Contenu réel de l'article. " * 20 + "</p>"
+            def raise_for_status(self):
+                pass
+        return R()
+
+    monkeypatch.setattr(synthesis.httpx, "get", fake_get)
+    tracking = "https://tracking.tldrnewsletter.com/CL0/https:%2F%2Fexample.com%2Fpost/1/010001/abc=1"
+    text = synthesis.fetch_article_text(tracking)
+
+    assert requested["url"] == "https://example.com/post"
+    assert text and "Contenu réel de l'article." in text
+
+
 def test_fetch_article_text_fallback_on_error(monkeypatch):
     """URL injoignable → None (l'article retombera sur son résumé stocké)."""
     import processors.synthesis as synthesis
@@ -377,8 +417,9 @@ def test_run_synthesis_manual_trigger_bypasses_skip(monkeypatch):
 
 
 def test_run_synthesis_target_date(monkeypatch):
-    """Génération pour une date choisie : corpus ancré à la fin de ce jour,
-    document écrit dans syntheses/{date choisie}."""
+    """Génération pour une date choisie : corpus limité aux articles collectés
+    ce jour-là (bornes début ET fin de journée), document écrit dans
+    syntheses/{date choisie}."""
     import processors.synthesis as synthesis
 
     _stub_synthesis(monkeypatch, synthesis)
@@ -390,6 +431,7 @@ def test_run_synthesis_target_date(monkeypatch):
     assert list(db.written.keys()) == ["2026-07-10"]
     doc = db.written["2026-07-10"]
     assert doc["target_date"] == "2026-07-10"
+    assert ("collected_at", ">=", "2026-07-10T00:00:00") in db.where_calls
     assert ("collected_at", "<=", "2026-07-10T23:59:59.999999") in db.where_calls
 
 

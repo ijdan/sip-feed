@@ -22,11 +22,9 @@ logger = logging.getLogger(__name__)
 genai.configure(api_key=os.environ["GEMINI_API_KEY"])
 
 MODEL_PRIORITY = [
-    "gemini-3-flash-preview",
-    "gemini-2.5-flash",
+    "gemini-3.5-flash",
     "gemini-3.1-flash-lite",
-    "gemini-2.0-flash",
-    "gemini-2.0-flash-lite",
+    "gemini-3-flash-preview",
 ]
 
 GENERATION_CONFIG = {

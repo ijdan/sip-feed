@@ -255,8 +255,8 @@ def generate_synthesis_now(date_: str | None = Query(None, alias="date"),
 
     Le collector est lancé avec COLLECTOR_SYNTHESIS_ONLY=1 : aucune collecte,
     régénération forcée (le skip « rien de nouveau » est contourné).
-    `date` (YYYY-MM-DD, optionnelle) : applique la logique comme si le run
-    avait eu lieu ce jour-là et écrit dans syntheses/{date}.
+    `date` (YYYY-MM-DD, optionnelle) : restreint le corpus aux articles
+    collectés ce jour-là et écrit dans syntheses/{date}.
     """
     synthesis_date = None
     if date_:

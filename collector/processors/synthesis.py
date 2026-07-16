@@ -5,14 +5,17 @@ Isolé du pipeline principal du collector : l'étape synthèse de `run()`
 1. lit le périmètre saisi dans l'IHM admin (`synthesis_source_ids`,
    `synthesis_categories` dans `settings/global`) et filtre les articles
    récents en conséquence ;
-2. télécharge le contenu intégral de chaque article du corpus et le réduit
-   à du texte brut (suppression HTML, CSS, scripts, images) ;
+2. télécharge le contenu intégral de chaque article du corpus depuis sa
+   vraie source (les liens de tracking newsletter sont déballés au préalable)
+   et le réduit à du texte brut (suppression HTML, CSS, scripts, images) ;
 3. envoie le tout au LLM avec le prompt de synthèse et le centre d'intérêt,
    puis écrit le résultat dans `syntheses/{date}`.
 """
 import logging
+import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, date
+from urllib.parse import unquote
 
 import httpx
 from bs4 import BeautifulSoup, Comment
@@ -34,6 +37,23 @@ SELECTION_MAX_ARTICLES = 25       # articles max retenus par la pré-sélection
 _STRIPPED_TAGS = ["script", "style", "img", "svg", "picture", "video", "audio",
                   "iframe", "noscript", "nav", "header", "footer", "form", "aside"]
 
+# Liens de tracking TLDR : l'URL réelle de l'article est encodée dans le chemin
+# (https://tracking.tldrnewsletter.com/CL0/<url-encodée>/1/<id>/<hash>)
+_TLDR_TRACKING_RE = re.compile(
+    r"^https?://tracking\.tldrnewsletter\.com/CL0/(?P<encoded>[^/]+)", re.IGNORECASE
+)
+
+
+def resolve_article_url(url: str) -> str:
+    """Retourne l'URL réelle de l'article quand l'URL stockée est un lien de
+    tracking de newsletter — le contenu est ainsi téléchargé directement
+    depuis la vraie source, sans dépendre du redirecteur."""
+    m = _TLDR_TRACKING_RE.match(url)
+    if not m:
+        return url
+    real = unquote(m.group("encoded"))
+    return real if real.startswith(("http://", "https://")) else url
+
 
 def extract_text(html: str) -> str:
     """Réduit une page HTML à son texte brut : ni balise, ni CSS, ni script, ni image."""
@@ -47,7 +67,14 @@ def extract_text(html: str) -> str:
 
 
 def fetch_article_text(url: str) -> str | None:
-    """Télécharge un article et retourne son texte nettoyé, ou None si inexploitable."""
+    """Télécharge un article et retourne son texte nettoyé, ou None si inexploitable.
+
+    Les liens de tracking sont d'abord déballés pour interroger la vraie source.
+    """
+    real_url = resolve_article_url(url)
+    if real_url != url:
+        logger.info(f"  Lien de tracking déballé → {real_url}")
+    url = real_url
     try:
         response = httpx.get(
             url,
@@ -124,10 +151,9 @@ def run_synthesis(db, global_settings: dict, model_priority: list[str],
     jour existe déjà pour le même périmètre et qu'aucun nouvel article n'y
     entre, la génération est sautée (aucun token consommé).
 
-    `target_date` (YYYY-MM-DD, génération manuelle) : applique la logique
-    comme si le run avait eu lieu ce jour-là — corpus limité aux articles
-    collectés jusqu'à la fin du jour choisi, document écrit dans
-    `syntheses/{target_date}`.
+    `target_date` (YYYY-MM-DD, génération manuelle) : corpus strictement
+    limité aux articles collectés ce jour-là (00:00 → 23:59), document
+    écrit dans `syntheses/{target_date}`.
     """
     interest = global_settings.get("interest", "").strip()
     if not interest:
@@ -163,8 +189,9 @@ def run_synthesis(db, global_settings: dict, model_priority: list[str],
 
     query = db.collection("articles")
     if target_date:
-        # Corpus tel qu'il était à la fin du jour ciblé
-        query = query.where("collected_at", "<=", f"{target_date}T23:59:59.999999")
+        # Corpus strictement limité aux articles collectés le jour ciblé
+        query = (query.where("collected_at", ">=", f"{target_date}T00:00:00")
+                      .where("collected_at", "<=", f"{target_date}T23:59:59.999999"))
     recent = query.order_by(
         "collected_at", direction="DESCENDING"
     ).limit(RECENT_ARTICLES_POOL).stream()
@@ -176,10 +203,12 @@ def run_synthesis(db, global_settings: dict, model_priority: list[str],
     result = None
 
     if not articles:
-        logger.warning("Aucun article dans le périmètre sélectionné — pas d'appel LLM.")
+        quand = f"collecté le {target_date} " if target_date else ""
+        logger.warning(f"Aucun article {quand}dans le périmètre sélectionné — pas d'appel LLM.")
         corpus = []
         result = {
-            "synthesis": "⚠️ Aucun article dans le périmètre sélectionné (sources/thèmes) — synthèse non générée.",
+            "synthesis": f"⚠️ Aucun article {quand}dans le périmètre sélectionné (sources/thèmes) "
+                         "— synthèse non générée.",
             "cited_ids": [],
         }
     else:

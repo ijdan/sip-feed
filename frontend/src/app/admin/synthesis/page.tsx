@@ -59,19 +59,20 @@ export default function SynthesisPage() {
   const [summaryProgressMsg, setSummaryProgressMsg] = useState("");
   const [summaryError, setSummaryError] = useState("");
 
-  const handleSummarize = async (article: any) => {
+  const handleSummarize = async (article: any, force = false) => {
     if (!token) return;
-    if (summaryData && summaryArticleId === article.id) {
+    if (!force && summaryData && summaryArticleId === article.id) {
       setSummaryOpen(true);
       return;
     }
+    setSummaryOpen(false);
     setSummaryLoading(true);
     setSummaryProgressMsg("Initialisation…");
     setSummaryError("");
     setSummaryArticleId(article.id);
     try {
       const res = await fetch(
-        `${API}/articles/${article.id}/summary`,
+        `${API}/articles/${article.id}/summary${force ? "?force=true" : ""}`,
         { method: "POST", headers: { Authorization: `Bearer ${token}` } }
       );
       if (!res.ok || !res.body) throw new Error("Erreur lors de la génération du résumé.");
@@ -160,6 +161,7 @@ export default function SynthesisPage() {
           data={summaryData}
           initialLang={lang}
           onClose={() => setSummaryOpen(false)}
+          onRegenerate={() => summaryArticleId && handleSummarize({ id: summaryArticleId }, true)}
         />
       )}
       <div className="flex items-center justify-between">
@@ -297,6 +299,17 @@ export default function SynthesisPage() {
                 }}>
                 {summaryLoading && summaryArticleId === modalArticle.id ? "…" : "✨ Résumé IA"}
               </button>
+              {/* Régénération — uniquement si un résumé existe déjà (qualité parfois insuffisante) */}
+              {modalArticle.has_summary && (
+                <button
+                  onClick={() => { const a = modalArticle; setModalArticle(null); handleSummarize(a, true); }}
+                  disabled={summaryLoading}
+                  title="Ignorer le résumé existant et en générer un nouveau (appel LLM)"
+                  className="px-4 py-2 rounded text-sm font-medium transition hover:opacity-80 disabled:opacity-50 border"
+                  style={{ backgroundColor: "var(--surface-2)", borderColor: "var(--border)", color: "var(--text)" }}>
+                  🔄 Régénérer
+                </button>
+              )}
               <a href={modalArticle.article_url} target="_blank" rel="noopener noreferrer"
                 className="inline-block px-4 py-2 rounded text-sm font-medium transition hover:opacity-80"
                 style={{ backgroundColor: "var(--text)", color: "var(--bg)" }}>

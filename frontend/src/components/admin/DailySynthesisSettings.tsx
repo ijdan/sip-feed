@@ -141,13 +141,24 @@ export default function DailySynthesisSettings({ token }: { token: string }) {
   const [generateMsg, setGenerateMsg] = useState("");
   const [generateDone, setGenerateDone] = useState(false);
   const [synthesisDate, setSynthesisDate] = useState(todayISO());
+  const [synthesisEndDate, setSynthesisEndDate] = useState(todayISO());
+
+  // Les dates ISO se comparent lexicographiquement
+  const rangeInvalid = !!synthesisDate && !!synthesisEndDate && synthesisDate > synthesisEndDate;
 
   const launchGeneration = async () => {
     if (!token || !settings || generating) return;
     setGenerating(true);
     setGenerateDone(false);
     const targetDate = synthesisDate || todayISO();
+    const targetEnd = synthesisEndDate || targetDate;
+    // Plage d'un seul jour = génération jour unique (pas de end_date envoyée)
+    const endParam = targetEnd !== targetDate ? targetEnd : undefined;
+    const periodLabel = endParam ? `la période du ${targetDate} au ${targetEnd}` : `le ${targetDate}`;
     try {
+      if (targetDate > targetEnd) {
+        throw new Error("La date de départ doit être antérieure ou égale à la date de fin.");
+      }
       if (!interest.trim()) {
         throw new Error("Renseignez un centre d'intérêt avant de générer.");
       }
@@ -155,16 +166,16 @@ export default function DailySynthesisSettings({ token }: { token: string }) {
       setGenerateMsg("Sauvegarde du périmètre…");
       await persist({}, true);
 
-      const before = (await api.admin.syntheses(token, targetDate))?.syntheses?.[0]?.generated_at ?? null;
-      await api.admin.generateSynthesis(token, targetDate);
-      setGenerateMsg(`Génération pour le ${targetDate} en cours… (~1 à 2 min)`);
+      const before = (await api.admin.syntheses(token, targetDate, endParam))?.syntheses?.[0]?.generated_at ?? null;
+      await api.admin.generateSynthesis(token, targetDate, endParam);
+      setGenerateMsg(`Génération pour ${periodLabel} en cours… (~1 à 2 min)`);
 
-      // Le job est asynchrone : on re-interroge la date ciblée jusqu'à voir
+      // Le job est asynchrone : on re-interroge la période ciblée jusqu'à voir
       // une synthèse plus récente (toutes les 10 s, abandon après 5 min).
       const startedAt = Date.now();
       const poll = async () => {
         try {
-          const fresh = await api.admin.syntheses(token, targetDate);
+          const fresh = await api.admin.syntheses(token, targetDate, endParam);
           const latest = fresh?.syntheses?.[0]?.generated_at ?? null;
           if (latest && latest !== before) {
             setGenerating(false);
@@ -306,25 +317,42 @@ export default function DailySynthesisSettings({ token }: { token: string }) {
       {/* Génération manuelle */}
       <div className="border-t pt-4 flex items-center gap-3 flex-wrap">
         <label className="flex items-center gap-2 text-sm text-gray-700">
-          Date de la synthèse
+          Articles collectés du
           <input
             type="date"
             value={synthesisDate}
-            max={todayISO()}
+            max={synthesisEndDate || todayISO()}
             onChange={(e) => setSynthesisDate(e.target.value)}
+            disabled={generating}
+            className="border rounded px-2 py-1.5 text-sm text-gray-700 bg-white disabled:opacity-50"
+          />
+        </label>
+        <label className="flex items-center gap-2 text-sm text-gray-700">
+          au
+          <input
+            type="date"
+            value={synthesisEndDate}
+            min={synthesisDate || undefined}
+            max={todayISO()}
+            onChange={(e) => setSynthesisEndDate(e.target.value)}
             disabled={generating}
             className="border rounded px-2 py-1.5 text-sm text-gray-700 bg-white disabled:opacity-50"
           />
         </label>
         <button
           onClick={launchGeneration}
-          disabled={generating || !settings}
-          title="Sauvegarde le périmètre affiché puis génère la synthèse de la date choisie, sans lancer de collecte (consomme des tokens LLM)"
+          disabled={generating || !settings || rangeInvalid}
+          title="Sauvegarde le périmètre affiché puis génère la synthèse des articles collectés sur la période choisie, sans lancer de collecte (consomme des tokens LLM)"
           className="px-4 py-2 rounded text-sm font-medium transition disabled:opacity-50"
           style={{ backgroundColor: "var(--text)", color: "var(--bg)" }}
         >
           {generating ? "Génération…" : "⚡ Générer la synthèse"}
         </button>
+        {rangeInvalid && (
+          <span className="text-sm font-medium" style={{ color: "#ef4444" }}>
+            La date de départ doit être antérieure ou égale à la date de fin.
+          </span>
+        )}
         {generateMsg && (
           <span className="text-sm font-medium"
             style={{ color: generateMsg.startsWith("✓") ? "#22c55e"
@@ -334,7 +362,8 @@ export default function DailySynthesisSettings({ token }: { token: string }) {
           </span>
         )}
         {generateDone && (
-          <Link href={`/admin/synthesis?date=${synthesisDate || todayISO()}`}
+          <Link href={`/admin/synthesis?date=${synthesisDate || todayISO()}${
+              synthesisEndDate && synthesisEndDate !== synthesisDate ? `&end_date=${synthesisEndDate}` : ""}`}
             className="text-sm font-medium hover:underline"
             style={{ color: "var(--accent)" }}>
             Voir la synthèse →

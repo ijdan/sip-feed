@@ -168,7 +168,8 @@ def purge_articles(_: dict = Depends(require_admin)):
 
 
 def _trigger_local(source_id: str | None = None, synthesis_only: bool = False,
-                   synthesis_date: str | None = None) -> dict:
+                   synthesis_date: str | None = None,
+                   synthesis_date_end: str | None = None) -> dict:
     """En local : lance le collector en sous-processus avec l'émulateur."""
     venv_python = COLLECTOR_DIR / "venv" / "bin" / "python"
     python = str(venv_python) if venv_python.exists() else "python3"
@@ -183,6 +184,8 @@ def _trigger_local(source_id: str | None = None, synthesis_only: bool = False,
         env["COLLECTOR_SYNTHESIS_ONLY"] = "1"
     if synthesis_date:
         env["COLLECTOR_SYNTHESIS_DATE"] = synthesis_date
+    if synthesis_date_end:
+        env["COLLECTOR_SYNTHESIS_DATE_END"] = synthesis_date_end
 
     import tempfile, pathlib
     log_file = pathlib.Path(tempfile.gettempdir()) / "collector_local.log"
@@ -198,7 +201,8 @@ def _trigger_local(source_id: str | None = None, synthesis_only: bool = False,
 
 
 def _trigger_job(source_id: str | None = None, synthesis_only: bool = False,
-                 synthesis_date: str | None = None) -> dict:
+                 synthesis_date: str | None = None,
+                 synthesis_date_end: str | None = None) -> dict:
     """Déclenche le Cloud Run Job, avec filtre source ou mode synthèse seule optionnels."""
     token = _get_access_token()
     env_vars = []
@@ -208,6 +212,8 @@ def _trigger_job(source_id: str | None = None, synthesis_only: bool = False,
         env_vars.append({"name": "COLLECTOR_SYNTHESIS_ONLY", "value": "1"})
     if synthesis_date:
         env_vars.append({"name": "COLLECTOR_SYNTHESIS_DATE", "value": synthesis_date})
+    if synthesis_date_end:
+        env_vars.append({"name": "COLLECTOR_SYNTHESIS_DATE_END", "value": synthesis_date_end})
     body: dict = {}
     if env_vars:
         body = {"overrides": {"containerOverrides": [{"env": env_vars}]}}
@@ -250,6 +256,7 @@ def collect_single_source(source_id: str, _: dict = Depends(require_admin)):
 
 @router.post("/synthesis/generate", status_code=202)
 def generate_synthesis_now(date_: str | None = Query(None, alias="date"),
+                           end_date_: str | None = Query(None, alias="end_date"),
                            _: dict = Depends(require_admin)):
     """Déclenche manuellement la génération de la synthèse (mode synthèse seule).
 
@@ -257,8 +264,15 @@ def generate_synthesis_now(date_: str | None = Query(None, alias="date"),
     régénération forcée (le skip « rien de nouveau » est contourné).
     `date` (YYYY-MM-DD, optionnelle) : restreint le corpus aux articles
     collectés ce jour-là et écrit dans syntheses/{date}.
+    `end_date` (YYYY-MM-DD, optionnelle) : étend le corpus aux articles
+    collectés entre `date` et `end_date` incluses (date de départ ≤ date de
+    fin), document écrit dans syntheses/{date}_{end_date}.
     """
+    if end_date_ and not date_:
+        raise HTTPException(status_code=400,
+                            detail="Date de départ requise quand une date de fin est fournie.")
     synthesis_date = None
+    synthesis_date_end = None
     if date_:
         try:
             parsed = date.fromisoformat(date_)
@@ -266,8 +280,25 @@ def generate_synthesis_now(date_: str | None = Query(None, alias="date"),
             raise HTTPException(status_code=400, detail="Date invalide — format attendu : YYYY-MM-DD.")
         if parsed > date.today():
             raise HTTPException(status_code=400, detail="La date ne peut pas être dans le futur.")
+        parsed_end = None
+        if end_date_:
+            try:
+                parsed_end = date.fromisoformat(end_date_)
+            except ValueError:
+                raise HTTPException(status_code=400,
+                                    detail="Date de fin invalide — format attendu : YYYY-MM-DD.")
+            if parsed_end > date.today():
+                raise HTTPException(status_code=400, detail="La date de fin ne peut pas être dans le futur.")
+            if parsed > parsed_end:
+                raise HTTPException(status_code=400,
+                                    detail="La date de départ doit être antérieure ou égale à la date de fin.")
+            if parsed_end == parsed:
+                parsed_end = None  # plage d'un seul jour = comportement jour unique
         if parsed != date.today():
             synthesis_date = parsed.isoformat()  # aujourd'hui = comportement par défaut
+        if parsed_end:
+            # end > start ≥ aujourd'hui étant rejeté, une plage implique start < aujourd'hui
+            synthesis_date_end = parsed_end.isoformat()
 
     db = get_db()
     doc = db.collection("settings").document("global").get()
@@ -277,9 +308,11 @@ def generate_synthesis_now(date_: str | None = Query(None, alias="date"),
                             detail="Aucun centre d'intérêt renseigné — synthèse désactivée.")
     if IS_LOCAL:
         _check_emulator_reachable()
-        return _trigger_local(synthesis_only=True, synthesis_date=synthesis_date)
+        return _trigger_local(synthesis_only=True, synthesis_date=synthesis_date,
+                              synthesis_date_end=synthesis_date_end)
     try:
-        return _trigger_job(synthesis_only=True, synthesis_date=synthesis_date)
+        return _trigger_job(synthesis_only=True, synthesis_date=synthesis_date,
+                            synthesis_date_end=synthesis_date_end)
     except httpx.RequestError as e:
         raise HTTPException(status_code=502, detail=str(e))
 
@@ -341,6 +374,7 @@ def get_stats(_: dict = Depends(require_admin)):
 
 @router.get("/syntheses")
 def get_syntheses(date_: str | None = Query(None, alias="date"),
+                  end_date_: str | None = Query(None, alias="end_date"),
                   _: dict = Depends(require_admin)):
     """Retourne les N dernières synthèses existantes avec les articles cités.
 
@@ -349,15 +383,18 @@ def get_syntheses(date_: str | None = Query(None, alias="date"),
     donne les plus récentes — y compris celles générées a posteriori pour
     une date passée.
     `date` (YYYY-MM-DD, optionnelle) : retourne uniquement la synthèse de ce
-    jour-là (consultation d'une date précise).
+    jour-là. Avec `end_date`, retourne la synthèse de la plage
+    `{date}_{end_date}` (consultation d'une période générée manuellement).
     """
     db = get_db()
     if date_:
         try:
-            day_ids = [date.fromisoformat(date_).isoformat()]
+            start = date.fromisoformat(date_).isoformat()
+            end = date.fromisoformat(end_date_).isoformat() if end_date_ else None
         except ValueError:
             raise HTTPException(status_code=400, detail="Date invalide — format attendu : YYYY-MM-DD.")
-        docs = [db.collection("syntheses").document(d).get() for d in day_ids]
+        doc_id = f"{start}_{end}" if end and end != start else start
+        docs = [db.collection("syntheses").document(doc_id).get()]
     else:
         settings_doc = db.collection("settings").document("global").get()
         count = (settings_doc.to_dict() or {}).get("synthesis_display_count", 3) if settings_doc.exists else 3

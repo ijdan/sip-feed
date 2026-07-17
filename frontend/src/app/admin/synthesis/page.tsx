@@ -10,6 +10,10 @@ import { ArticleSummary } from "@/lib/types";
 
 const API = process.env.NEXT_PUBLIC_API_URL;
 
+const formatDay = (d: string, opts: Intl.DateTimeFormatOptions =
+    { weekday: "long", day: "numeric", month: "long", year: "numeric" }) =>
+  new Date(d).toLocaleDateString("fr-FR", opts);
+
 export default function SynthesisPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
@@ -21,25 +25,34 @@ export default function SynthesisPage() {
     if (status === "authenticated" && role !== "admin") router.replace("/");
   }, [status, role, router]);
 
-  // Filtre optionnel ?date=YYYY-MM-DD (lien « Voir la synthèse » de l'admin)
+  // Filtre optionnel ?date=YYYY-MM-DD[&end_date=YYYY-MM-DD]
+  // (lien « Voir la synthèse » de l'admin, jour unique ou période)
   const [dateFilter, setDateFilter] = useState<string | null>(null);
+  const [endDateFilter, setEndDateFilter] = useState<string | null>(null);
   const [dateFilterReady, setDateFilterReady] = useState(false);
   useEffect(() => {
-    const d = new URLSearchParams(window.location.search).get("date");
-    if (d && /^\d{4}-\d{2}-\d{2}$/.test(d)) setDateFilter(d);
+    const params = new URLSearchParams(window.location.search);
+    const d = params.get("date");
+    const end = params.get("end_date");
+    if (d && /^\d{4}-\d{2}-\d{2}$/.test(d)) {
+      setDateFilter(d);
+      if (end && /^\d{4}-\d{2}-\d{2}$/.test(end)) setEndDateFilter(end);
+    }
     setDateFilterReady(true);
   }, []);
 
   const { data, isLoading, mutate } = useSWR(
     token && role === "admin" && dateFilterReady
-      ? `admin-syntheses${dateFilter ? `-${dateFilter}` : ""}`
+      ? `admin-syntheses${dateFilter ? `-${dateFilter}` : ""}${endDateFilter ? `-${endDateFilter}` : ""}`
       : null,
-    () => fetch(`${API}/admin/syntheses${dateFilter ? `?date=${dateFilter}` : ""}`,
+    () => fetch(`${API}/admin/syntheses${dateFilter
+        ? `?date=${dateFilter}${endDateFilter ? `&end_date=${endDateFilter}` : ""}` : ""}`,
       { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json())
   );
 
   const clearDateFilter = () => {
     setDateFilter(null);
+    setEndDateFilter(null);
     window.history.replaceState(null, "", "/admin/synthesis");
   };
 
@@ -173,13 +186,14 @@ export default function SynthesisPage() {
         </button>
       </div>
 
-      {/* Bandeau filtre date (consultation d'une date générée manuellement) */}
+      {/* Bandeau filtre date (consultation d'une date ou période générée manuellement) */}
       {dateFilter && (
         <div className="rounded-lg border px-4 py-3 flex items-center justify-between gap-4 flex-wrap"
           style={{ backgroundColor: "var(--surface-2)", borderColor: "var(--border)" }}>
           <span className="text-sm" style={{ color: "var(--text)" }}>
-            📅 Synthèse du{" "}
-            <strong>{new Date(dateFilter).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</strong>
+            📅 Synthèse {endDateFilter ? "de la période du" : "du"}{" "}
+            <strong>{formatDay(dateFilter)}</strong>
+            {endDateFilter && <> au <strong>{formatDay(endDateFilter)}</strong></>}
           </span>
           <button onClick={clearDateFilter}
             className="text-sm hover:underline" style={{ color: "var(--text-muted)" }}>
@@ -192,11 +206,13 @@ export default function SynthesisPage() {
         <div className="rounded-xl border p-8 text-center"
           style={{ backgroundColor: "var(--surface)", borderColor: "var(--border)" }}>
           <p className="text-lg mb-2" style={{ color: "var(--text)" }}>
-            {dateFilter ? "Aucune synthèse pour cette date" : "Aucune synthèse disponible"}
+            {dateFilter
+              ? `Aucune synthèse pour cette ${endDateFilter ? "période" : "date"}`
+              : "Aucune synthèse disponible"}
           </p>
           <p className="text-sm" style={{ color: "var(--text-muted)" }}>
             {dateFilter
-              ? "Générez-la depuis la section « Synthèse du jour » de la console admin en choisissant cette date."
+              ? `Générez-la depuis la section « Synthèse du jour » de la console admin en choisissant cette ${endDateFilter ? "période" : "date"}.`
               : "Renseignez un centre d'intérêt dans la section « Synthèse du jour » de la console admin et lancez une collecte."}
           </p>
         </div>
@@ -210,12 +226,14 @@ export default function SynthesisPage() {
               <div>
                 <p className="font-semibold" style={{ color: "var(--text)" }}>🎯 {s.interest}</p>
                 <p className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
-                  {new Date(s.date).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })}
+                  {s.target_date_end && s.target_date_end !== (s.target_date ?? s.date)
+                    ? `du ${formatDay(s.target_date ?? s.date, { day: "numeric", month: "long" })} au ${formatDay(s.target_date_end, { day: "numeric", month: "long" })}`
+                    : formatDay(s.target_date ?? s.date, { weekday: "long", day: "numeric", month: "long" })}
                   {" · "}{s.articles_count} articles analysés
                   {s.perimeter_count != null && s.perimeter_count !== s.articles_count &&
                     ` (sur ${s.perimeter_count} dans le périmètre)`}
                   {" · "}
-                  {s.generated_at?.slice(0, 10) !== s.date
+                  {s.generated_at?.slice(0, 10) !== (s.target_date_end ?? s.date)
                     ? `générée a posteriori le ${new Date(s.generated_at).toLocaleDateString("fr-FR", { day: "numeric", month: "long" })} à ${new Date(s.generated_at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}`
                     : new Date(s.generated_at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
                   {s.usage?.total_tokens > 0 &&

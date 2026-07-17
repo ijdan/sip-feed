@@ -168,14 +168,16 @@ def run():
 
     # Synthèse du jour — périmètre admin + contenu intégral (cf. processors/synthesis.py)
     # En mode synthèse seule, new_articles=None désactive le skip « rien de
-    # nouveau » : un déclenchement manuel régénère toujours. La date ciblée
-    # (COLLECTOR_SYNTHESIS_DATE) n'est honorée qu'en mode manuel.
+    # nouveau » : un déclenchement manuel régénère toujours. La période ciblée
+    # (COLLECTOR_SYNTHESIS_DATE / COLLECTOR_SYNTHESIS_DATE_END) n'est honorée
+    # qu'en mode manuel.
     if interest:
         try:
             target_date = os.environ.get("COLLECTOR_SYNTHESIS_DATE") if synthesis_only else None
+            target_date_end = os.environ.get("COLLECTOR_SYNTHESIS_DATE_END") if synthesis_only else None
             run_synthesis(db, global_settings, model_priority,
                           new_articles=None if synthesis_only else enriched_articles,
-                          target_date=target_date)
+                          target_date=target_date, target_date_end=target_date_end)
         except Exception as e:
             logger.error(f"Erreur lors de la génération de la synthèse : {e}", exc_info=True)
     elif synthesis_only:

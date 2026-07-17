@@ -69,10 +69,11 @@ export const api = {
     updateSettings: (token: string, body: object) =>
       apiFetch("/admin/settings", token, { method: "PUT", body: JSON.stringify(body) }),
     report: (token: string) => apiFetch("/admin/report", token),
-    syntheses: (token: string, date?: string) =>
-      apiFetch(`/admin/syntheses${date ? `?date=${date}` : ""}`, token),
-    generateSynthesis: (token: string, date?: string) =>
-      apiFetch(`/admin/synthesis/generate${date ? `?date=${date}` : ""}`, token, { method: "POST" }),
+    syntheses: (token: string, date?: string, endDate?: string) =>
+      apiFetch(`/admin/syntheses${date ? `?date=${date}${endDate ? `&end_date=${endDate}` : ""}` : ""}`, token),
+    generateSynthesis: (token: string, date?: string, endDate?: string) =>
+      apiFetch(`/admin/synthesis/generate${date ? `?date=${date}${endDate ? `&end_date=${endDate}` : ""}` : ""}`,
+        token, { method: "POST" }),
     stats: (token: string) => apiFetch("/admin/stats", token),
     logs: (token: string) => apiFetch("/admin/logs", token),
     collect: (token: string) =>

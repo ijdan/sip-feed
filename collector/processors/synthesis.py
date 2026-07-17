@@ -4,7 +4,7 @@ Isolé du pipeline principal du collector : l'étape synthèse de `run()`
 (main.py) délègue entièrement ici. Le traitement :
 1. lit le périmètre saisi dans l'IHM admin (`synthesis_source_ids`,
    `synthesis_categories` dans `settings/global`) et filtre les articles
-   récents en conséquence ;
+   collectés le jour de la synthèse en conséquence ;
 2. télécharge le contenu intégral de chaque article du corpus depuis sa
    vraie source (les liens de tracking newsletter sont déballés au préalable)
    et le réduit à du texte brut (suppression HTML, CSS, scripts, images) ;
@@ -151,9 +151,10 @@ def run_synthesis(db, global_settings: dict, model_priority: list[str],
     jour existe déjà pour le même périmètre et qu'aucun nouvel article n'y
     entre, la génération est sautée (aucun token consommé).
 
-    `target_date` (YYYY-MM-DD, génération manuelle) : corpus strictement
-    limité aux articles collectés ce jour-là (00:00 → 23:59), document
-    écrit dans `syntheses/{target_date}`.
+    Le corpus est strictement limité aux articles collectés le jour de la
+    synthèse (00:00 → 23:59) : le jour courant par défaut (run automatique),
+    ou `target_date` (YYYY-MM-DD, génération manuelle) — le document est
+    écrit dans `syntheses/{date}`.
     """
     interest = global_settings.get("interest", "").strip()
     if not interest:
@@ -187,11 +188,11 @@ def run_synthesis(db, global_settings: dict, model_priority: list[str],
                 f"thèmes : {', '.join(categories) if categories else 'tous'} ; "
                 f"plafond prompt : {max_input_chars} caractères")
 
-    query = db.collection("articles")
-    if target_date:
-        # Corpus strictement limité aux articles collectés le jour ciblé
-        query = (query.where("collected_at", ">=", f"{target_date}T00:00:00")
-                      .where("collected_at", "<=", f"{target_date}T23:59:59.999999"))
+    # Corpus strictement limité aux articles collectés le jour de la synthèse
+    # (date du jour pour le run automatique, date choisie en génération manuelle)
+    query = (db.collection("articles")
+               .where("collected_at", ">=", f"{synthesis_date}T00:00:00")
+               .where("collected_at", "<=", f"{synthesis_date}T23:59:59.999999"))
     recent = query.order_by(
         "collected_at", direction="DESCENDING"
     ).limit(RECENT_ARTICLES_POOL).stream()
@@ -203,12 +204,12 @@ def run_synthesis(db, global_settings: dict, model_priority: list[str],
     result = None
 
     if not articles:
-        quand = f"collecté le {target_date} " if target_date else ""
-        logger.warning(f"Aucun article {quand}dans le périmètre sélectionné — pas d'appel LLM.")
+        logger.warning(f"Aucun article collecté le {synthesis_date} dans le périmètre sélectionné "
+                       "— pas d'appel LLM.")
         corpus = []
         result = {
-            "synthesis": f"⚠️ Aucun article {quand}dans le périmètre sélectionné (sources/thèmes) "
-                         "— synthèse non générée.",
+            "synthesis": f"⚠️ Aucun article collecté le {synthesis_date} dans le périmètre "
+                         "sélectionné (sources/thèmes) — synthèse non générée.",
             "cited_ids": [],
         }
     else:

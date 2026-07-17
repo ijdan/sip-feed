@@ -435,6 +435,44 @@ def test_run_synthesis_target_date(monkeypatch):
     assert ("collected_at", "<=", "2026-07-10T23:59:59.999999") in db.where_calls
 
 
+def test_run_synthesis_date_range(monkeypatch):
+    """Génération pour une plage de dates : corpus borné du début du premier
+    jour à la fin du dernier, document écrit dans syntheses/{start}_{end}."""
+    import processors.synthesis as synthesis
+
+    _stub_synthesis(monkeypatch, synthesis)
+    db = _FakeDb(ARTICLES)
+    settings = {"interest": "IA", "synthesis_source_ids": [], "synthesis_categories": []}
+
+    synthesis.run_synthesis(db, settings, ["fake-model"],
+                            target_date="2026-07-08", target_date_end="2026-07-10")
+
+    assert list(db.written.keys()) == ["2026-07-08_2026-07-10"]
+    doc = db.written["2026-07-08_2026-07-10"]
+    assert doc["target_date"] == "2026-07-08"
+    assert doc["target_date_end"] == "2026-07-10"
+    assert ("collected_at", ">=", "2026-07-08T00:00:00") in db.where_calls
+    assert ("collected_at", "<=", "2026-07-10T23:59:59.999999") in db.where_calls
+
+
+def test_run_synthesis_invalid_range_writes_nothing(monkeypatch):
+    """Date de fin antérieure à la date de départ → abandon, aucune écriture,
+    aucun appel LLM."""
+    import processors.synthesis as synthesis
+
+    def _fail(*args, **kwargs):
+        raise AssertionError("aucun appel LLM attendu sur une période invalide")
+
+    monkeypatch.setattr(synthesis, "generate_synthesis", _fail)
+    monkeypatch.setattr(synthesis, "select_relevant_articles", _fail)
+    db = _FakeDb(ARTICLES)
+
+    synthesis.run_synthesis(db, {"interest": "IA"}, ["fake-model"],
+                            target_date="2026-07-10", target_date_end="2026-07-08")
+
+    assert db.written == {}
+
+
 def test_run_synthesis_default_date_is_today(monkeypatch):
     """Sans date ciblée (run automatique) : document du jour, corpus limité
     aux articles collectés le jour même — même logique que le manuel."""

@@ -144,17 +144,20 @@ def _add_usage(total: dict, usage: dict | None) -> dict:
 
 def run_synthesis(db, global_settings: dict, model_priority: list[str],
                   new_articles: list[dict] | None = None,
-                  target_date: str | None = None) -> None:
+                  target_date: str | None = None,
+                  target_date_end: str | None = None) -> None:
     """Génère la synthèse du jour et l'écrit dans `syntheses/{date}`.
 
     `new_articles` : articles ajoutés par le run en cours. Si la synthèse du
     jour existe déjà pour le même périmètre et qu'aucun nouvel article n'y
     entre, la génération est sautée (aucun token consommé).
 
-    Le corpus est strictement limité aux articles collectés le jour de la
-    synthèse (00:00 → 23:59) : le jour courant par défaut (run automatique),
-    ou `target_date` (YYYY-MM-DD, génération manuelle) — le document est
-    écrit dans `syntheses/{date}`.
+    Le corpus est strictement limité aux articles collectés sur la période de
+    la synthèse (00:00 du premier jour → 23:59 du dernier) : le jour courant
+    par défaut (run automatique), ou la plage `target_date` → `target_date_end`
+    (YYYY-MM-DD, génération manuelle ; date_end omise = jour unique). Le
+    document est écrit dans `syntheses/{date}` pour un jour unique, ou
+    `syntheses/{date}_{date_end}` pour une plage.
     """
     interest = global_settings.get("interest", "").strip()
     if not interest:
@@ -164,7 +167,16 @@ def run_synthesis(db, global_settings: dict, model_priority: list[str],
     categories = global_settings.get("synthesis_categories") or []
     max_input_chars = int(global_settings.get("synthesis_max_input_chars") or MAX_SYNTHESIS_INPUT)
     synthesis_date = target_date or date.today().isoformat()
-    today_ref = db.collection("syntheses").document(synthesis_date)
+    date_end = target_date_end or synthesis_date
+    if date_end < synthesis_date:
+        logger.error(f"Période de synthèse invalide : la date de départ ({synthesis_date}) "
+                     f"doit être antérieure ou égale à la date de fin ({date_end}) — abandon.")
+        return
+    doc_id = synthesis_date if date_end == synthesis_date else f"{synthesis_date}_{date_end}"
+    # Libellé de période pour les logs et messages (« le J » ou « entre le J1 et le J2 »)
+    periode = (f"le {synthesis_date}" if date_end == synthesis_date
+               else f"entre le {synthesis_date} et le {date_end}")
+    today_ref = db.collection("syntheses").document(doc_id)
 
     # Levier économie n°1 : ne pas régénérer si rien n'a changé depuis la
     # synthèse du jour (même centre d'intérêt, même périmètre, aucun nouvel
@@ -183,16 +195,16 @@ def run_synthesis(db, global_settings: dict, model_priority: list[str],
                             "aucun appel LLM.")
                 return
 
-    logger.info(f"Génération de la synthèse pour : «{interest}» (date : {synthesis_date})...")
+    logger.info(f"Génération de la synthèse pour : «{interest}» (articles collectés {periode})...")
     logger.info(f"Périmètre — sources : {', '.join(source_ids) if source_ids else 'toutes'} ; "
                 f"thèmes : {', '.join(categories) if categories else 'tous'} ; "
                 f"plafond prompt : {max_input_chars} caractères")
 
-    # Corpus strictement limité aux articles collectés le jour de la synthèse
-    # (date du jour pour le run automatique, date choisie en génération manuelle)
+    # Corpus strictement limité aux articles collectés sur la période de la
+    # synthèse (jour courant pour le run automatique, plage choisie en manuel)
     query = (db.collection("articles")
                .where("collected_at", ">=", f"{synthesis_date}T00:00:00")
-               .where("collected_at", "<=", f"{synthesis_date}T23:59:59.999999"))
+               .where("collected_at", "<=", f"{date_end}T23:59:59.999999"))
     recent = query.order_by(
         "collected_at", direction="DESCENDING"
     ).limit(RECENT_ARTICLES_POOL).stream()
@@ -204,11 +216,11 @@ def run_synthesis(db, global_settings: dict, model_priority: list[str],
     result = None
 
     if not articles:
-        logger.warning(f"Aucun article collecté le {synthesis_date} dans le périmètre sélectionné "
+        logger.warning(f"Aucun article collecté {periode} dans le périmètre sélectionné "
                        "— pas d'appel LLM.")
         corpus = []
         result = {
-            "synthesis": f"⚠️ Aucun article collecté le {synthesis_date} dans le périmètre "
+            "synthesis": f"⚠️ Aucun article collecté {periode} dans le périmètre "
                          "sélectionné (sources/thèmes) — synthèse non générée.",
             "cited_ids": [],
         }
@@ -259,6 +271,7 @@ def run_synthesis(db, global_settings: dict, model_priority: list[str],
     today_ref.set({
         "interest": interest,
         "target_date": synthesis_date,
+        "target_date_end": date_end,
         "source_ids": source_ids,
         "categories": categories,
         "content": result["synthesis"],

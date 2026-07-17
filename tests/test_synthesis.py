@@ -321,7 +321,7 @@ def test_run_synthesis_empty_perimeter_skips_llm(monkeypatch):
     synthesis.run_synthesis(db, settings, ["fake-model"])
 
     doc = next(iter(db.written.values()))
-    assert "Aucun article dans le périmètre" in doc["content"]
+    assert f"Aucun article collecté le {_today()} dans le périmètre" in doc["content"]
     assert doc["articles_count"] == 0
     assert doc["cited_ids"] == []
     assert doc["usage"]["total_tokens"] == 0
@@ -436,7 +436,8 @@ def test_run_synthesis_target_date(monkeypatch):
 
 
 def test_run_synthesis_default_date_is_today(monkeypatch):
-    """Sans date ciblée : document du jour, aucun filtre de date sur le corpus."""
+    """Sans date ciblée (run automatique) : document du jour, corpus limité
+    aux articles collectés le jour même — même logique que le manuel."""
     import processors.synthesis as synthesis
 
     _stub_synthesis(monkeypatch, synthesis)
@@ -445,7 +446,8 @@ def test_run_synthesis_default_date_is_today(monkeypatch):
     synthesis.run_synthesis(db, {"interest": "IA"}, ["fake-model"])
 
     assert list(db.written.keys()) == [_today()]
-    assert db.where_calls == []
+    assert ("collected_at", ">=", f"{_today()}T00:00:00") in db.where_calls
+    assert ("collected_at", "<=", f"{_today()}T23:59:59.999999") in db.where_calls
 
 
 def test_run_synthesis_retries_after_failed_synthesis(monkeypatch):

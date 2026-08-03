@@ -786,3 +786,55 @@ def test_les_plafonds_de_troncature_sont_reellement_appliques():
     assert "logs[:MAX_REPORT_LOGS]" in source
     assert "content[:MAX_GMAIL_CONTENT_FOR_PROMPT]" in source
     assert "[:8000]" not in source and "[:50000]" not in source
+
+
+# ─── Traçabilité du build ─────────────────────────────────────────────────────
+# On a passé deux itérations à se demander « ce run a-t-il tourné sur le
+# nouveau code ? ». Le job était déployé sur le tag :latest, donc indéterminable
+# après coup. Le SHA est désormais journalisé et persisté hors LLM.
+
+def test_le_build_est_persiste_avec_le_rapport():
+    """Le SHA doit être écrit en dur dans reports/latest, pas rédigé par le LLM."""
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[1] / "collector/main.py").read_text()
+    assert '"build": BUILD' in source, "le build doit accompagner le rapport"
+    assert 'logger.info(f"Collector — build {BUILD}")' in source, "build absent des logs"
+
+
+def test_le_build_retombe_sur_inconnu_hors_ci():
+    """En local, sans GIT_SHA, le collector ne doit pas planter."""
+    import os
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[1] / "collector/main.py").read_text()
+    # Reproduit l'expression sans importer main.py (qui ouvre une connexion Firestore).
+    ligne = next(l for l in source.splitlines() if l.startswith("BUILD = "))
+    contexte = {"os": os}
+    env_sans_sha = {k: v for k, v in os.environ.items() if k != "GIT_SHA"}
+    with_patched = os.environ
+    try:
+        os.environ = env_sans_sha  # type: ignore[assignment]
+        exec(ligne, contexte)
+    finally:
+        os.environ = with_patched  # type: ignore[assignment]
+    assert contexte["BUILD"] == "inconnu"
+
+
+def test_le_job_est_deploye_sur_un_tag_immuable():
+    """`:latest` rend le build indéterminable après coup — on tague par SHA."""
+    from pathlib import Path
+
+    ci = (Path(__file__).resolve().parents[1] / ".github/workflows/ci-cd.yml").read_text()
+    # Portée : les deux Cloud Run *Jobs* (collector, log-analyzer). Les services
+    # backend/frontend gardent :latest — une révision Cloud Run en conserve le
+    # digest, ils restent donc traçables ; un Job, non.
+    blocs = ci.split("gcloud run jobs update")[1:]
+    assert len(blocs) == 2, "collector + log-analyzer attendus"
+
+    for bloc in blocs:
+        commande = bloc.split("--quiet")[0]
+        image = next(l for l in commande.splitlines() if "--image=" in l)
+        assert ":latest" not in image, f"job déployé sur un tag mouvant : {image.strip()}"
+        assert "github.sha" in image, f"tag non traçable : {image.strip()}"
+        assert "--update-env-vars=GIT_SHA=" in commande, "GIT_SHA non injecté"

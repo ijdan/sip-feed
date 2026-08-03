@@ -36,6 +36,11 @@ logging.getLogger().addHandler(_mem_handler)
 
 db = firestore.Client(project=os.environ.get("FIRESTORE_PROJECT_ID", "tech-news-aggregator-001"))
 
+# SHA du commit déployé, injecté par la CI (`--update-env-vars=GIT_SHA=...`).
+# Journalisé à chaque run et persisté avec le rapport : sans ça, impossible de
+# savoir après coup quelle version du code a produit une exécution donnée.
+BUILD = (os.environ.get("GIT_SHA") or "inconnu")[:12]
+
 
 # DEFAULT_MODEL_PRIORITY vit dans gemini_processor (cf. import ci-dessus).
 
@@ -67,6 +72,7 @@ def apply_retention(retention_days: int) -> int:
 
 
 def run():
+    logger.info(f"Collector — build {BUILD}")
     global_settings = get_global_settings()
     llm_enabled = global_settings.get("llm_enabled", True)
     thinking_enabled = global_settings.get("thinking_enabled", True) and llm_enabled
@@ -185,9 +191,12 @@ def run():
     report = generate_run_report(run_logs, model_priority)
 
     # Persistance du rapport dans Firestore
+    # `build` est écrit hors LLM : c'est la seule trace fiable de la version
+    # du code ayant produit ce rapport, indépendante de ce que le modèle rédige.
     db.collection("reports").document("latest").set({
         "content": report,
         "generated_at": datetime.utcnow().isoformat(),
+        "build": BUILD,
     })
     logger.info("📋 Rapport d'exécution généré et sauvegardé.")
 

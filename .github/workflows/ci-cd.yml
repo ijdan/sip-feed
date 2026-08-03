@@ -175,21 +175,30 @@ jobs:
       - uses: google-github-actions/setup-gcloud@v3
       - name: Configure Docker
         run: gcloud auth configure-docker ${{ env.GCP_REGION }}-docker.pkg.dev --quiet
+      # L'image est taguée avec le SHA du commit en plus de :latest. Le job
+      # pointe sur le tag SHA : on sait ainsi toujours quel build a produit une
+      # exécution donnée, ce que `:latest` seul rendait indéterminable.
       - name: Build & push image
         run: |
-          docker build -t ${{ env.REGISTRY }}/collector:latest ./collector
+          docker build \
+            -t ${{ env.REGISTRY }}/collector:latest \
+            -t ${{ env.REGISTRY }}/collector:${{ github.sha }} \
+            ./collector
           docker push ${{ env.REGISTRY }}/collector:latest
+          docker push ${{ env.REGISTRY }}/collector:${{ github.sha }}
       - name: Update Cloud Run Job — collector
         run: |
           gcloud run jobs update collector \
-            --image=${{ env.REGISTRY }}/collector:latest \
+            --image=${{ env.REGISTRY }}/collector:${{ github.sha }} \
+            --update-env-vars=GIT_SHA=${{ github.sha }} \
             --region=${{ env.GCP_REGION }} \
             --project=${{ env.GCP_PROJECT }} \
             --quiet
       - name: Update Cloud Run Job — log-analyzer
         run: |
           gcloud run jobs update log-analyzer \
-            --image=${{ env.REGISTRY }}/collector:latest \
+            --image=${{ env.REGISTRY }}/collector:${{ github.sha }} \
+            --update-env-vars=GIT_SHA=${{ github.sha }} \
             --args="python,analyze_logs.py" \
             --region=${{ env.GCP_REGION }} \
             --project=${{ env.GCP_PROJECT }} \

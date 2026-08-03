@@ -5,8 +5,8 @@ import useSWR, { mutate } from "swr";
 const API = process.env.NEXT_PUBLIC_API_URL;
 
 const MODEL_LABELS: Record<string, { label: string; note?: string }> = {
-  "gemini-3.5-flash":        { label: "Gemini 3.5 Flash",     note: "Dernière génération — GA" },
-  "gemini-3.1-flash-lite":   { label: "Gemini 3.1 Flash Lite",note: "Rapide — stable" },
+  "gemini-3.5-flash":        { label: "Gemini 3.5 Flash",     note: "Qualité max — 1,50 $/9,00 $ par Mtok" },
+  "gemini-3.1-flash-lite":   { label: "Gemini 3.1 Flash Lite",note: "Économique — 0,25 $/1,50 $ par Mtok" },
   "gemini-3-flash-preview":  { label: "Gemini 3 Flash",       note: "Preview — fallback" },
   "gemma-4-31b-it":          { label: "Gemma 4 31B",          note: "Open source — 31B" },
   "gemma-4-26b-a4b-it":      { label: "Gemma 4 26B",          note: "Dernier recours" },
@@ -29,6 +29,9 @@ interface Settings {
   llm_enabled: boolean;
   thinking_enabled: boolean;
   model_priority: string[];
+  // Renvoyé tel quel au PUT : sans lui, l'ordre par défaut du code serait
+  // réappliqué à la sauvegarde suivante et écraserait le choix de l'admin.
+  model_priority_version: number;
   gmail_lookback_days: number;
   retention_days: number;
   interest: string;

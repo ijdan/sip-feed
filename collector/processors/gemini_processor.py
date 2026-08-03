@@ -7,15 +7,42 @@ import google.generativeai as genai
 
 genai.configure(api_key=os.environ["GEMINI_API_KEY"])
 
+# Le modèle le moins cher passe en premier : l'essentiel du travail (reformulation
+# de dépêches, extraction de mots-clés, rapport d'exécution) ne justifie pas un
+# modèle 6× plus cher au token. Gemini 3.5 Flash reste en second comme repli qualité.
 DEFAULT_MODEL_PRIORITY = [
-    "gemini-3.5-flash",
-    "gemini-3.1-flash-lite",
+    "gemini-3.1-flash-lite",   # 0,25 $ / 1,50 $ par Mtok
+    "gemini-3.5-flash",        # 1,50 $ / 9,00 $ par Mtok
     "gemini-3-flash-preview",
     "gemma-4-31b-it",
     "gemma-4-26b-a4b-it",
 ]
 
+# À incrémenter à CHAQUE changement de l'ordre par défaut ci-dessus.
+# Sans ce marqueur, l'ordre stocké en Firestore l'emporte pour toujours et
+# modifier DEFAULT_MODEL_PRIORITY reste sans effet sur un projet existant
+# (c'est ce qui est arrivé à la mise à jour de juillet 2026).
+MODEL_PRIORITY_VERSION = 2
+
 CATEGORIES = ["IA", "DevOps", "Cloud", "Sécurité", "Dev", "IT", "Autre"]
+
+
+def merge_model_priority(stored: list[str], stored_version: int = 0) -> list[str]:
+    """Concilie l'ordre choisi dans l'admin et l'ordre par défaut du code.
+
+    - version stockée périmée → l'ordre par défaut s'applique (une seule fois),
+      sinon un changement de cascade côté code resterait sans effet en prod ;
+    - sinon on respecte l'ordre de l'admin, en purgeant les modèles inconnus
+      et en insérant les nouveaux en tête.
+    """
+    if stored_version < MODEL_PRIORITY_VERSION:
+        return list(DEFAULT_MODEL_PRIORITY)
+
+    connus = [m for m in stored if m in DEFAULT_MODEL_PRIORITY]
+    for model in reversed(DEFAULT_MODEL_PRIORITY):
+        if model not in connus:
+            connus.insert(0, model)
+    return connus
 
 # Limites de contenu pour les prompts LLM
 MAX_ARTICLE_CONTENT_FOR_BATCH = 1500    # chars max par article dans le prompt batch

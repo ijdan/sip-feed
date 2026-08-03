@@ -64,12 +64,13 @@ Switch indépendant. Configure `thinking_config = {"thinking_budget": -1}` (auto
 Liste ordonnée des modèles connus avec boutons ▲▼ pour réordonner. Chaque modèle a une étiquette explicative (ex. "Gemini 3 Flash — Dernière génération", "Gemini 2.0 Flash Lite — Dernier recours"). La liste persiste dans `model_priority[]`.
 
 **Règles métier**
-- Liste canonique côté backend (`DEFAULT_MODEL_PRIORITY`, dupliquée 3x — cf. CLAUDE.md).
+- Liste canonique `DEFAULT_MODEL_PRIORITY`, dupliquée 3x — cf. CLAUDE.md. Le modèle **le moins cher est en tête** : l'essentiel du travail (reformulation, mots-clés, rapport) ne justifie pas un modèle 6x plus cher au token.
 - Au GET, les modèles inconnus stockés sont nettoyés, les nouveaux sont insérés **en tête** automatiquement.
-- Le collector essaie les modèles dans l'ordre ; passe au suivant en cas d'échec (quota, indisponibilité).
+- L'ordre stocké fait autorité sur la constante. Changer l'ordre par défaut n'a d'effet sur un projet existant que si `MODEL_PRIORITY_VERSION` est incrémentée : la nouvelle liste s'applique alors **une seule fois**, puis le choix de l'admin redevient prioritaire.
+- Le collector essaie les modèles dans l'ordre ; passe au suivant en cas d'échec (quota, indisponibilité). Un échec au niveau du compte (facturation bloquée) interrompt la cascade — aucun modèle ne peut aboutir.
 
 **Critères d'acceptation**
-1. La liste affiche les 8 modèles dans l'ordre actuel.
+1. La liste affiche les 5 modèles dans l'ordre actuel.
 2. Cliquer ▲ ou ▼ déplace le modèle d'une position.
 3. La sauvegarde est immédiate (PUT /admin/settings).
 4. Le collector utilise réellement l'ordre au prochain run (vérifiable dans les logs).

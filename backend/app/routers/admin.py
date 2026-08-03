@@ -44,18 +44,29 @@ CLOUD_RUN_JOB_URL = (
 )
 
 
+# Le modèle le moins cher passe en premier (cf. collector/processors/gemini_processor.py,
+# où cette liste et sa version sont dupliquées — modifier les deux ensemble).
 DEFAULT_MODEL_PRIORITY = [
-    "gemini-3.5-flash",
-    "gemini-3.1-flash-lite",
+    "gemini-3.1-flash-lite",   # 0,25 $ / 1,50 $ par Mtok
+    "gemini-3.5-flash",        # 1,50 $ / 9,00 $ par Mtok
     "gemini-3-flash-preview",
     "gemma-4-31b-it",
     "gemma-4-26b-a4b-it",
 ]
 
+# À incrémenter à CHAQUE changement de l'ordre par défaut : sans ce marqueur,
+# l'ordre stocké en Firestore l'emporte pour toujours et la constante ci-dessus
+# reste sans effet sur un projet existant.
+MODEL_PRIORITY_VERSION = 2
+
 class GlobalSettings(BaseModel):
     llm_enabled: bool = True
     thinking_enabled: bool = True
     model_priority: list[str] = DEFAULT_MODEL_PRIORITY
+    # Défaut = version courante : un PUT qui omettrait le champ ne doit pas
+    # rejouer la migration et écraser l'ordre choisi dans l'admin. La détection
+    # d'un document périmé se fait sur le Firestore brut, pas sur ce défaut.
+    model_priority_version: int = MODEL_PRIORITY_VERSION
     gmail_lookback_days: int = 1
     retention_days: int = 0
     interest: str = ""
@@ -81,15 +92,25 @@ def get_settings(_: dict = Depends(require_admin)):
     if not doc.exists:
         return GlobalSettings()
     data = doc.to_dict()
-    stored = data.get("model_priority", [])
-    # Garde uniquement les modèles connus, ajoute les nouveaux en tête
-    stored = [m for m in stored if m in DEFAULT_MODEL_PRIORITY]
-    for model in reversed(DEFAULT_MODEL_PRIORITY):
-        if model not in stored:
-            stored.insert(0, model)
+    stored_version = data.get("model_priority_version", 0)
+
+    if stored_version < MODEL_PRIORITY_VERSION:
+        # L'ordre par défaut du code vient de changer : il s'applique une fois,
+        # puis l'ordre choisi dans l'admin redevient prioritaire.
+        stored = list(DEFAULT_MODEL_PRIORITY)
+    else:
+        stored = [m for m in data.get("model_priority", []) if m in DEFAULT_MODEL_PRIORITY]
+        for model in reversed(DEFAULT_MODEL_PRIORITY):
+            if model not in stored:
+                stored.insert(0, model)
+
     data["model_priority"] = stored
-    # Persiste la liste nettoyée
-    db.collection("settings").document("global").update({"model_priority": stored})
+    data["model_priority_version"] = MODEL_PRIORITY_VERSION
+    # Persiste la liste nettoyée et la version appliquée
+    db.collection("settings").document("global").update({
+        "model_priority": stored,
+        "model_priority_version": MODEL_PRIORITY_VERSION,
+    })
     return GlobalSettings(**data)
 
 

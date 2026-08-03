@@ -450,3 +450,69 @@ def test_select_relevant_articles_interrompt_aussi_la_cascade(monkeypatch):
 
     assert resultat is None
     assert appels == ["modele-a"], "cascade non interrompue"
+
+
+# ─── Ordre de la cascade de modèles ───────────────────────────────────────────
+# Régression : l'ordre stocké en Firestore l'emportait sans condition, si bien
+# qu'une modification de DEFAULT_MODEL_PRIORITY restait sans effet en prod.
+
+def test_le_modele_le_moins_cher_est_en_tete():
+    """Flash Lite (0,25 $/Mtok) doit précéder Flash (1,50 $/Mtok)."""
+    from processors.gemini_processor import DEFAULT_MODEL_PRIORITY
+
+    assert DEFAULT_MODEL_PRIORITY[0] == "gemini-3.1-flash-lite"
+    assert DEFAULT_MODEL_PRIORITY.index("gemini-3.1-flash-lite") < \
+        DEFAULT_MODEL_PRIORITY.index("gemini-3.5-flash")
+
+
+def test_backend_et_collector_partagent_le_meme_ordre():
+    """Les copies dupliquées de la liste ne doivent pas diverger."""
+    import re
+    from pathlib import Path
+    from processors.gemini_processor import DEFAULT_MODEL_PRIORITY
+
+    racine = Path(__file__).resolve().parents[1]
+    for fichier in ("backend/app/routers/admin.py",
+                    "backend/app/services/article_summarizer.py"):
+        source = (racine / fichier).read_text()
+        bloc = re.search(r"DEFAULT_MODEL_PRIORITY = \[(.*?)\]", source, re.S).group(1)
+        modeles = re.findall(r'"([^"]+)"', bloc)
+        assert modeles == DEFAULT_MODEL_PRIORITY, f"{fichier} a divergé du collector"
+
+
+def test_version_perimee_reapplique_lordre_par_defaut():
+    """Le cœur du correctif : un projet existant doit recevoir le nouvel ordre."""
+    from processors.gemini_processor import merge_model_priority, DEFAULT_MODEL_PRIORITY
+
+    ordre_stocke_en_juillet = [
+        "gemini-3.5-flash", "gemini-3-flash-preview", "gemini-3.1-flash-lite",
+        "gemma-4-31b-it", "gemma-4-26b-a4b-it",
+    ]
+    assert merge_model_priority(ordre_stocke_en_juillet, 0) == DEFAULT_MODEL_PRIORITY
+    assert merge_model_priority(ordre_stocke_en_juillet, 1) == DEFAULT_MODEL_PRIORITY
+
+
+def test_version_a_jour_respecte_lordre_choisi_dans_ladmin():
+    """Une fois la migration passée, le choix de l'utilisateur redevient roi."""
+    from processors.gemini_processor import merge_model_priority, MODEL_PRIORITY_VERSION
+
+    choix_admin = [
+        "gemma-4-31b-it", "gemini-3.1-flash-lite", "gemini-3.5-flash",
+        "gemini-3-flash-preview", "gemma-4-26b-a4b-it",
+    ]
+    assert merge_model_priority(choix_admin, MODEL_PRIORITY_VERSION) == choix_admin
+
+
+def test_purge_les_modeles_inconnus_et_insere_les_nouveaux():
+    """Comportement historique conservé pour une version à jour."""
+    from processors.gemini_processor import merge_model_priority, MODEL_PRIORITY_VERSION
+
+    resultat = merge_model_priority(
+        ["modele-retire-du-catalogue", "gemini-3.5-flash"], MODEL_PRIORITY_VERSION
+    )
+    assert "modele-retire-du-catalogue" not in resultat
+    assert set(resultat) == {
+        "gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-3-flash-preview",
+        "gemma-4-31b-it", "gemma-4-26b-a4b-it",
+    }
+    assert resultat[-1] == "gemini-3.5-flash", "les modèles absents s'insèrent en tête"

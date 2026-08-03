@@ -10,9 +10,10 @@ import google.generativeai as genai
 
 logger = logging.getLogger(__name__)
 
+# Doit rester aligné sur app/routers/admin.py et collector/processors/gemini_processor.py.
 DEFAULT_MODEL_PRIORITY = [
-    "gemini-3.5-flash",
-    "gemini-3.1-flash-lite",
+    "gemini-3.1-flash-lite",   # 0,25 $ / 1,50 $ par Mtok
+    "gemini-3.5-flash",        # 1,50 $ / 9,00 $ par Mtok
     "gemini-3-flash-preview",
     "gemma-4-31b-it",
     "gemma-4-26b-a4b-it",

@@ -23,7 +23,7 @@
 **Règles métier**
 - Toujours généré (peu importe la valeur de `interest` ou autres settings).
 - Les logs sont tronqués à 8000 caractères (constante `MAX_REPORT_LOGS`).
-- Si tous les modèles LLM échouent → message "⚠️ Rapport indisponible — tous les modèles LLM sont hors quota."
+- Si tous les modèles LLM échouent → message "⚠️ Rapport indisponible — tous les modèles LLM ont échoué :" suivi de la cause réelle par modèle (code HTTP + message de l'API). Ne jamais annoncer un quota sans un 429 effectivement reçu.
 - Le doc `reports/latest` écrase à chaque run (pas d'historique).
 
 **Critères d'acceptation**

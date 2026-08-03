@@ -111,7 +111,7 @@ Les logs normalisés sont assemblés en un prompt envoyé à Gemini (cascade de 
 - Le prompt LLM demande au moins `items` avec : ① les erreurs répétées (≥ 3 occurrences) ; ② les erreurs uniques de sévérité ERROR/CRITICAL ; ③ les tendances inhabituelles (pic de 4xx, latence anormale si détectable dans les logs).
 - Les items sont triés par priorité décroissante (`CRITIQUE` en premier).
 - Maximum 20 items par rapport (écrêtage côté LLM dans le prompt).
-- Si tous les modèles Gemini échouent → `items: []`, `resume: "⚠️ Analyse indisponible — tous les modèles LLM sont hors quota."`.
+- Si tous les modèles Gemini échouent → `items: []`, `resume: "⚠️ Analyse LLM indisponible — tous les modèles Gemini ont retourné une erreur."` (constante `MESSAGE_INDISPONIBILITE_LLM`), la cause réelle par modèle étant journalisée.
 - Le `prompt_correction` doit inclure le nom du service concerné, l'heure de l'événement, et une instruction concrète ("Recherche dans `backend/app/routers/articles.py` pourquoi…").
 
 **Critères d'acceptation**

@@ -139,7 +139,7 @@ export default function AdminSettings({ token }: { token: string }) {
           <p className="text-sm font-medium text-gray-700">Priorité des modèles LLM</p>
           {saving && <span className="text-xs text-gray-400">Sauvegarde...</span>}
         </div>
-        <p className="text-xs text-gray-400">Le collector essaie les modèles dans l'ordre. Si le premier est indisponible (quota), il passe au suivant.</p>
+        <p className="text-xs text-gray-400">Le collector essaie les modèles dans l'ordre. Si le premier échoue (quota, modèle indisponible, erreur d'API), il passe au suivant. La cause exacte de chaque échec figure dans le rapport d'exécution.</p>
         <div className="space-y-2">
           {(settings.model_priority ?? []).map((modelId, i) => {
             const info = MODEL_LABELS[modelId] ?? { label: modelId };

@@ -46,7 +46,7 @@ Champ texte + bouton "Sauvegarder" en haut de `/admin/synthesis`. Persiste dans 
 **Règles métier**
 - Toujours les **100 plus récents articles** par `collected_at` desc.
 - Structure attendue (cf. prompt) : "🔭 Vue d'ensemble" / "🔑 Points clés" / "📈 Tendances" / "❓ Ce qui manque".
-- Si tous les modèles LLM échouent → synthèse `"⚠️ Synthèse indisponible — quota LLM épuisé."`.
+- Si tous les modèles LLM échouent → synthèse `"⚠️ Synthèse indisponible — tous les modèles LLM ont échoué :"` suivie de la cause réelle par modèle (code HTTP + message de l'API).
 - Document Firestore : `{interest, content (markdown), cited_ids, articles_count, generated_at}`.
 
 **Critères d'acceptation**

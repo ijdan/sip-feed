@@ -206,3 +206,141 @@ def test_enrich_articles_category_injected_in_keywords(monkeypatch):
     results = gemini_processor.enrich_articles_batch([SAMPLE_ARTICLES[1]])
     assert results[0]["keywords_fr"][0] == "DevOps", "Catégorie absente en tête des keywords_fr"
     assert results[0]["keywords_en"][0] == "DevOps", "Catégorie absente en tête des keywords_en"
+
+
+# ─── Diagnostic des échecs LLM ────────────────────────────────────────────────
+# Régression : la cascade signalait tous les échecs comme « quota épuisé » en
+# ne journalisant que le nom de la classe d'exception. La vraie cause doit
+# désormais remonter, et le mot « quota » ne doit apparaître que sur un 429.
+
+def _fail_with(exc):
+    """Construit un faux genai.GenerativeModel dont l'appel lève `exc`."""
+    from unittest.mock import MagicMock
+    model = MagicMock()
+    model.generate_content = MagicMock(side_effect=exc)
+    return lambda *a, **k: model
+
+
+def test_call_llm_expose_le_message_derreur_reel(monkeypatch):
+    """Un 404 doit être rapporté comme modèle introuvable, pas comme un quota."""
+    from processors import gemini_processor
+    from google.api_core import exceptions as gexc
+
+    monkeypatch.setattr(gemini_processor.genai, "GenerativeModel",
+                        _fail_with(gexc.NotFound("models/modele-x is not found for API version v1beta")))
+
+    with pytest.raises(gemini_processor.LLMCascadeError) as excinfo:
+        gemini_processor._call_llm("prompt", ["modele-x"])
+
+    message = str(excinfo.value)
+    assert "404" in message, "le code HTTP réel doit être conservé"
+    assert "is not found for API version" in message, "le message brut de l'API doit être conservé"
+    assert "quota" not in message.lower(), "un 404 ne doit jamais être présenté comme un quota"
+
+
+def test_call_llm_signale_un_vrai_quota(monkeypatch):
+    """Un 429 — et lui seul — doit être qualifié de dépassement de quota."""
+    from processors import gemini_processor
+    from google.api_core import exceptions as gexc
+
+    monkeypatch.setattr(gemini_processor.genai, "GenerativeModel",
+                        _fail_with(gexc.ResourceExhausted("Quota exceeded for quota metric")))
+
+    with pytest.raises(gemini_processor.LLMCascadeError) as excinfo:
+        gemini_processor._call_llm("prompt", ["modele-x"])
+
+    assert "429" in str(excinfo.value)
+    assert "QUOTA" in str(excinfo.value)
+
+
+def test_call_llm_cumule_les_echecs_de_toute_la_cascade(monkeypatch):
+    """Chaque modèle essayé doit apparaître dans l'erreur finale."""
+    from processors import gemini_processor
+    from google.api_core import exceptions as gexc
+
+    monkeypatch.setattr(gemini_processor.genai, "GenerativeModel",
+                        _fail_with(gexc.PermissionDenied("API not enabled")))
+
+    with pytest.raises(gemini_processor.LLMCascadeError) as excinfo:
+        gemini_processor._call_llm("prompt", ["modele-a", "modele-b"])
+
+    assert [m for m, _ in excinfo.value.failures] == ["modele-a", "modele-b"]
+    assert "403" in str(excinfo.value)
+
+
+def test_call_llm_retente_sans_thinking_config_si_non_supporte(monkeypatch):
+    """Le SDK rejette `thinking_config` côté client : on retente sans, et ça marche."""
+    from unittest.mock import MagicMock
+    from processors import gemini_processor
+
+    configs_recus = []
+
+    def fake_model(model_name, generation_config=None):
+        model = MagicMock()
+
+        def generate(prompt):
+            configs_recus.append(generation_config or {})
+            if "thinking_config" in (generation_config or {}):
+                raise ValueError("Unknown field for GenerationConfig: thinking_config")
+            response = MagicMock()
+            response.text = '{"ok": true}'
+            return response
+
+        model.generate_content = generate
+        return model
+
+    monkeypatch.setattr(gemini_processor.genai, "GenerativeModel", fake_model)
+
+    assert gemini_processor._call_llm("prompt", ["modele-a"], thinking=True) == '{"ok": true}'
+    assert len(configs_recus) == 2, "un essai avec thinking, puis un sans"
+    assert "thinking_config" not in configs_recus[1]
+
+
+def test_call_llm_ne_masque_pas_une_erreur_api_derriere_le_fallback_thinking(monkeypatch):
+    """Une erreur API ne doit pas être confondue avec `thinking_config` non supporté."""
+    from processors import gemini_processor
+    from google.api_core import exceptions as gexc
+
+    monkeypatch.setattr(gemini_processor.genai, "GenerativeModel",
+                        _fail_with(gexc.BadRequest("Invalid JSON payload")))
+
+    with pytest.raises(gemini_processor.LLMCascadeError) as excinfo:
+        gemini_processor._call_llm("prompt", ["modele-a"], thinking=True)
+
+    assert "Invalid JSON payload" in str(excinfo.value)
+
+
+def test_call_llm_explicite_une_reponse_sans_texte(monkeypatch):
+    """Réponse tronquée (MAX_TOKENS) : la raison doit être lisible, pas opaque."""
+    from unittest.mock import MagicMock, PropertyMock
+    from processors import gemini_processor
+
+    response = MagicMock()
+    type(response).text = PropertyMock(side_effect=ValueError("no Part"))
+    candidat = MagicMock()
+    candidat.finish_reason = "MAX_TOKENS"
+    response.candidates = [candidat]
+
+    model = MagicMock()
+    model.generate_content = MagicMock(return_value=response)
+    monkeypatch.setattr(gemini_processor.genai, "GenerativeModel", lambda *a, **k: model)
+
+    with pytest.raises(gemini_processor.LLMCascadeError) as excinfo:
+        gemini_processor._call_llm("prompt", ["modele-a"], thinking=False)
+
+    assert "MAX_TOKENS" in str(excinfo.value)
+
+
+def test_generate_run_report_rapporte_la_cause_reelle(monkeypatch):
+    """Le fallback du rapport ne doit plus affirmer « hors quota » sans preuve."""
+    from processors import gemini_processor
+    from google.api_core import exceptions as gexc
+
+    monkeypatch.setattr(gemini_processor.genai, "GenerativeModel",
+                        _fail_with(gexc.NotFound("models/modele-x is not found")))
+
+    rapport = gemini_processor.generate_run_report("des logs", ["modele-x"])
+
+    assert "hors quota" not in rapport
+    assert "modele-x" in rapport
+    assert "404" in rapport

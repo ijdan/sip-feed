@@ -1,6 +1,7 @@
 import os
 import uuid
 import json
+import logging
 from datetime import datetime
 import google.generativeai as genai
 
@@ -27,6 +28,73 @@ LLM_TEMPERATURE = 0.4                   # Température génération LLM
 LLM_MAX_TOKENS_BATCH = 60_000           # Max tokens pour batch d'articles
 LLM_MAX_TOKENS_SYNTHESIS = 8_000        # Max tokens pour la synthèse
 TITLE_LOG_MAX_LENGTH = 60               # Longueur max des titres dans les logs
+MAX_ERROR_DETAIL = 300                  # chars max du message d'erreur conservé dans les logs
+
+logger = logging.getLogger(__name__)
+
+# Diagnostic des échecs LLM. Sans ça, tous les échecs remontaient comme
+# « quota épuisé » alors que la cause réelle est le plus souvent ailleurs
+# (modèle inconnu de la version d'API appelée, paramètre non supporté, clé
+# restreinte). Ne jamais parler de quota sans un 429 effectivement reçu.
+_HTTP_DIAGNOSTIC = {
+    400: "requête refusée par l'API — paramètre non supporté par ce modèle",
+    401: "clé API absente ou invalide",
+    403: "accès refusé — API non activée sur le projet, ou clé restreinte",
+    404: "modèle introuvable sur la version d'API appelée",
+    429: "QUOTA OU DÉBIT DÉPASSÉ (429)",
+    500: "erreur interne Google",
+    503: "modèle temporairement surchargé",
+}
+
+
+def _describe_llm_error(exc: Exception) -> str:
+    """Rend l'échec d'un appel Gemini lisible : code HTTP, diagnostic, message brut.
+
+    Le message brut est toujours conservé — c'est lui qui permet de trancher
+    entre un vrai dépassement de quota et une erreur de configuration.
+    """
+    message = str(exc).strip().replace("\n", " ")[:MAX_ERROR_DETAIL]
+    code = getattr(exc, "code", None)
+    if not isinstance(code, int):
+        response = getattr(exc, "response", None)
+        code = getattr(response, "status_code", None)
+
+    diagnostic = _HTTP_DIAGNOSTIC.get(code) if isinstance(code, int) else None
+    prefix = f"HTTP {code} — {diagnostic}" if diagnostic else exc.__class__.__name__
+    return f"{prefix} : {message}"
+
+
+class LLMCascadeError(RuntimeError):
+    """Tous les modèles de la cascade ont échoué — porte le détail par modèle."""
+
+    def __init__(self, failures: list[tuple[str, str]]):
+        self.failures = failures
+        detail = " | ".join(f"{model} → {reason}" for model, reason in failures)
+        super().__init__(
+            f"les {len(failures)} modèle(s) de la cascade ont échoué : {detail}"
+            if failures else "aucun modèle LLM configuré dans model_priority"
+        )
+
+
+def _extract_response_text(response, model_name: str) -> str:
+    """Lit le texte d'une réponse Gemini en explicitant les réponses vides.
+
+    Une réponse tronquée (thinking qui consomme tout le budget de sortie) ou
+    bloquée par les filtres de sécurité ne porte aucun texte : `response.text`
+    lève alors une erreur opaque. On la remplace par la vraie raison.
+    """
+    try:
+        return response.text.strip()
+    except Exception as exc:
+        candidates = getattr(response, "candidates", None) or []
+        finish_reason = getattr(candidates[0], "finish_reason", None) if candidates else None
+        feedback = getattr(response, "prompt_feedback", None)
+        raise RuntimeError(
+            f"{model_name} a répondu sans texte exploitable "
+            f"(finish_reason={finish_reason}, prompt_feedback={feedback}) : "
+            f"{str(exc)[:MAX_ERROR_DETAIL]}"
+        ) from exc
+
 
 BATCH_PROMPT_BILINGUAL = """
 Tu es journaliste tech bilingue (français / anglais).
@@ -189,38 +257,62 @@ BASE_GENERATION_CONFIG = {
 }
 
 
+_thinking_unsupported_logged = False
+
+
+def _generate(model_name: str, prompt: str, thinking: bool | None):
+    """Un appel Gemini. thinking=None retire complètement `thinking_config`."""
+    config = dict(BASE_GENERATION_CONFIG)
+    if thinking is not None:
+        # thinking_budget: -1 = auto (modèle décide), 0 = désactivé
+        config["thinking_config"] = {"thinking_budget": -1 if thinking else 0}
+    return genai.GenerativeModel(model_name, generation_config=config).generate_content(prompt)
+
+
 def _call_llm(prompt: str, models_to_try: list[str], thinking: bool = True) -> str:
-    """Appelle le LLM en cascade jusqu'au premier modèle disponible."""
-    import logging
-    logger = logging.getLogger(__name__)
+    """Appelle le LLM en cascade jusqu'au premier modèle disponible.
 
-    # thinking_budget: -1 = auto (modèle décide), 0 = désactivé
-    thinking_config = {"thinking_budget": -1 if thinking else 0}
+    Chaque échec est journalisé avec son code HTTP et son message brut : c'est
+    la seule façon de distinguer un vrai 429 d'une erreur de configuration.
+    """
+    global _thinking_unsupported_logged
+
     logger.debug(f"Thinking mode : {'activé (auto)' if thinking else 'désactivé'}")
+    failures: list[tuple[str, str]] = []
 
-    last_error = None
     for model_name in models_to_try:
         try:
             logger.debug(f"Essai modèle : {model_name}")
             try:
-                config = {**BASE_GENERATION_CONFIG, "thinking_config": thinking_config}
-                m = genai.GenerativeModel(model_name, generation_config=config)
-                response = m.generate_content(prompt)
-            except Exception:
-                # Fallback sans thinking si le modèle ne le supporte pas
-                m = genai.GenerativeModel(model_name, generation_config=BASE_GENERATION_CONFIG)
-                response = m.generate_content(prompt)
-            text = response.text.strip()
+                response = _generate(model_name, prompt, thinking=thinking)
+            except ValueError as exc:
+                # Le SDK installé ignore `thinking_config` : il rejette la config
+                # avant tout appel réseau. On réessaie sans, mais on le dit — sinon
+                # le réglage « thinking » de l'admin est silencieusement sans effet.
+                if "thinking_config" not in str(exc):
+                    raise
+                if not _thinking_unsupported_logged:
+                    logger.warning(
+                        "Le SDK google-generativeai installé ne supporte pas "
+                        "`thinking_config` — le réglage « thinking » de l'admin est "
+                        "sans effet. Appels effectués sans ce paramètre."
+                    )
+                    _thinking_unsupported_logged = True
+                response = _generate(model_name, prompt, thinking=None)
+
+            text = _extract_response_text(response, model_name)
             if text.startswith("```"):
                 text = text.split("```")[1]
                 if text.startswith("json"):
                     text = text[4:]
             logger.info(f"Modèle utilisé avec succès : {model_name}")
             return text.strip()
-        except Exception as e:
-            logger.warning(f"Modèle {model_name} indisponible : {e.__class__.__name__}")
-            last_error = e
-    raise last_error or RuntimeError("Aucun modèle disponible")
+        except Exception as exc:
+            reason = _describe_llm_error(exc)
+            logger.warning(f"Modèle {model_name} en échec — {reason}")
+            failures.append((model_name, reason))
+
+    raise LLMCascadeError(failures)
 
 
 def extract_and_enrich_gmail(
@@ -229,9 +321,6 @@ def extract_and_enrich_gmail(
     model_priority: list[str] | None = None,
 ) -> list[dict]:
     """Traite chaque email individuellement pour maximiser la couverture."""
-    import logging
-    logger = logging.getLogger(__name__)
-
     if not email_contents:
         return []
 
@@ -263,7 +352,7 @@ def extract_and_enrich_gmail(
                         "collected_at": datetime.utcnow().isoformat(),
                     })
         except Exception as e:
-            logger.error(f"  Échec traitement email {i} : {e.__class__.__name__}")
+            logger.error(f"  Échec traitement email {i} — {_describe_llm_error(e)}")
 
     logger.info(f"Total Gmail : {len(all_articles)} article(s) extrait(s) sur {len(email_contents)} email(s)")
     return all_articles
@@ -347,9 +436,6 @@ def select_relevant_articles(articles: list[dict], interest: str, model_priority
     pertinents pour le centre d'intérêt (appel LLM léger, avant récupération
     du contenu intégral). Retourne {selected_ids, usage}, ou None si tous les
     modèles ont échoué."""
-    import logging
-    logger = logging.getLogger(__name__)
-
     articles_text = ""
     for a in articles:
         title = a.get("title_fr") or a.get("title", "")
@@ -369,14 +455,14 @@ def select_relevant_articles(articles: list[dict], interest: str, model_priority
         try:
             m = genai.GenerativeModel(model_name, generation_config=config)
             response = m.generate_content(prompt)
-            result = json.loads(response.text.strip())
+            result = json.loads(_extract_response_text(response, model_name))
             ids = [i for i in result.get("selected_ids", []) if isinstance(i, str)][:max_selected]
             usage = _usage_from_response(response)
             logger.info(f"Sélection par {model_name} — {len(ids)}/{len(articles)} article(s) retenus, "
                         f"{usage['total_tokens']} tokens")
             return {"selected_ids": ids, "usage": usage}
         except Exception as e:
-            logger.warning(f"Sélection : {model_name} indisponible ({e.__class__.__name__}: {str(e)[:200]})")
+            logger.warning(f"Sélection : {model_name} en échec — {_describe_llm_error(e)}")
 
     return None
 
@@ -384,9 +470,6 @@ def select_relevant_articles(articles: list[dict], interest: str, model_priority
 def generate_synthesis(articles: list[dict], interest: str, model_priority: list[str] | None = None,
                        max_input_chars: int = MAX_SYNTHESIS_INPUT) -> dict:
     """Génère une synthèse ciblée. Retourne {synthesis, cited_ids, usage}."""
-    import logging
-    logger = logging.getLogger(__name__)
-
     _no_usage = {"prompt_tokens": 0, "output_tokens": 0, "total_tokens": 0}
     if not interest.strip():
         return {"synthesis": "", "cited_ids": [], "usage": _no_usage}
@@ -412,7 +495,7 @@ def generate_synthesis(articles: list[dict], interest: str, model_priority: list
         try:
             m = genai.GenerativeModel(model_name, generation_config=config)
             response = m.generate_content(prompt)
-            result = json.loads(response.text.strip())
+            result = json.loads(_extract_response_text(response, model_name))
             usage = _usage_from_response(response)
             logger.info(f"Synthèse générée par {model_name} — {len(result.get('cited_ids', []))} articles cités, "
                         f"{usage['total_tokens']} tokens")
@@ -422,9 +505,9 @@ def generate_synthesis(articles: list[dict], interest: str, model_priority: list
                 "usage": usage,
             }
         except Exception as e:
-            detail = str(e)[:200]
-            logger.warning(f"Synthèse : {model_name} indisponible ({e.__class__.__name__}: {detail})")
-            errors.append(f"- **{model_name}** : {e.__class__.__name__} — {detail}")
+            reason = _describe_llm_error(e)
+            logger.warning(f"Synthèse : {model_name} en échec — {reason}")
+            errors.append(f"- **{model_name}** : {reason}")
 
     details = "\n".join(errors)
     return {
@@ -458,13 +541,16 @@ par email, total retenu après déduplication.
 
 **Traitement LLM**
 Indique quel modèle a effectivement traité les articles, ou si le fallback
-brut a été utilisé (et pourquoi : quota, modèle introuvable...).
+brut a été utilisé. Si des modèles ont échoué, recopie la cause EXACTE telle
+qu'elle figure dans les logs (code HTTP et message). N'attribue jamais un
+échec à un dépassement de quota si les logs ne montrent pas un code 429.
 
 **Résultat**
 Nombre d'articles nouveaux sauvegardés. Signale les doublons ignorés.
 
 **Anomalies**
-Erreurs rencontrées (quota épuisé, modèle non trouvé, source inaccessible...).
+Erreurs rencontrées, reprises littéralement des logs (code HTTP + message).
+N'invente pas de cause : si les logs ne la donnent pas, écris-le.
 Si aucune anomalie, indique-le explicitement.
 
 **Recommandations** (si pertinent)
@@ -476,26 +562,27 @@ Sois factuel, concis. N'invente rien qui ne figure pas dans les logs.
 
 def generate_run_report(logs: str, model_priority: list[str] | None = None) -> str:
     """Génère un rapport de synthèse de l'exécution via LLM."""
-    import logging
-    logger = logging.getLogger(__name__)
-
     prompt = REPORT_PROMPT.format(logs=logs[:8000])
     models_to_try = model_priority or DEFAULT_MODEL_PRIORITY
 
+    errors = []
     for model_name in models_to_try:
         try:
             m = genai.GenerativeModel(model_name)
             response = m.generate_content(prompt)
             logger.info(f"Rapport généré par {model_name}")
-            return response.text.strip()
+            return _extract_response_text(response, model_name)
         except Exception as e:
-            logger.warning(f"Rapport : modèle {model_name} indisponible ({e.__class__.__name__})")
+            reason = _describe_llm_error(e)
+            logger.warning(f"Rapport : modèle {model_name} en échec — {reason}")
+            errors.append(f"- **{model_name}** : {reason}")
 
-    return "⚠️ Rapport indisponible — tous les modèles LLM sont hors quota."
+    details = "\n".join(errors) or "aucun modèle configuré dans model_priority."
+    return f"⚠️ Rapport indisponible — tous les modèles LLM ont échoué :\n{details}"
 
 
 def save_raw_articles(raw_articles: list[dict]) -> list[dict]:
-    """Sauvegarde les articles sans traitement LLM (fallback quota)."""
+    """Sauvegarde les articles sans traitement LLM (fallback si la cascade échoue)."""
     return [
         {
             "id": str(uuid.uuid4()),

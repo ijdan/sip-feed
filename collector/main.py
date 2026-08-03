@@ -149,7 +149,7 @@ def run():
             try:
                 enriched_articles = enrich_articles_batch(all_raw, model_priority=model_priority, thinking=thinking_enabled)
             except Exception as e:
-                logger.error(f"Tous les modèles LLM ont échoué ({e.__class__.__name__}) — sauvegarde des articles bruts sans enrichissement.")
+                logger.error(f"Enrichissement LLM abandonné — {e} — sauvegarde des articles bruts sans enrichissement.")
                 enriched_articles = save_raw_articles(all_raw)
         else:
             logger.info("LLM désactivé — sauvegarde des articles bruts.")

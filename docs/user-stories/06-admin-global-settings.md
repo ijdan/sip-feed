@@ -64,7 +64,7 @@ Switch indépendant. Configure `thinking_config = {"thinking_budget": -1}` (auto
 Liste ordonnée des modèles connus avec boutons ▲▼ pour réordonner. Chaque modèle a une étiquette explicative (ex. "Gemini 3 Flash — Dernière génération", "Gemini 2.0 Flash Lite — Dernier recours"). La liste persiste dans `model_priority[]`.
 
 **Règles métier**
-- Liste canonique `DEFAULT_MODEL_PRIORITY`, dupliquée 3x — cf. CLAUDE.md. Elle est **triée par coût croissant** ($ par million de tokens, entrée puis sortie) : on sollicite toujours le moins cher d'abord et on ne monte en gamme — donc en prix — que si le modèle courant refuse. À prix égal, le modèle GA passe devant le preview.
+- Liste canonique `DEFAULT_MODEL_PRIORITY`, dupliquée 3x — cf. CLAUDE.md. Elle est **triée par coût croissant parmi les modèles qui tiennent la qualité attendue** : on sollicite le moins cher d'abord et on ne monte en gamme — donc en prix — que si le modèle courant refuse. À prix égal, le modèle GA passe devant le preview. Les Gemma sont les moins chers du catalogue mais rendent des descriptions trop courtes pour la fiche article (4 à 6 phrases attendues) : ils restent en **repli de dernier recours**.
 - Au GET, les modèles inconnus stockés sont nettoyés, les nouveaux sont insérés **en tête** automatiquement.
 - L'ordre stocké fait autorité sur la constante. Changer l'ordre par défaut n'a d'effet sur un projet existant que si `MODEL_PRIORITY_VERSION` est incrémentée : la nouvelle liste s'applique alors **une seule fois**, puis le choix de l'admin redevient prioritaire.
 - Motifs de montée d'un cran, journalisés distinctement dans le rapport d'exécution :

@@ -466,13 +466,26 @@ PRIX_PAR_MTOK = {
 }
 
 
-def test_la_cascade_est_triee_du_moins_cher_au_plus_cher():
-    """Règle de conception : on sollicite toujours le moins cher d'abord."""
+# Les Gemma sont les moins chers du catalogue mais rendent des descriptions
+# trop courtes pour la fiche article : ils sont relégués en repli.
+MODELES_DE_REPLI = ("gemma-4-31b-it", "gemma-4-26b-a4b-it")
+
+
+def test_le_moins_cher_des_modeles_retenus_est_en_tete():
+    """Parmi les modèles qui tiennent la qualité, le moins cher passe d'abord."""
     from processors.gemini_processor import DEFAULT_MODEL_PRIORITY
 
-    couts = [PRIX_PAR_MTOK[m] for m in DEFAULT_MODEL_PRIORITY]
-    assert couts == sorted(couts), f"cascade non triée par coût : {DEFAULT_MODEL_PRIORITY}"
-    assert DEFAULT_MODEL_PRIORITY[-1] == "gemini-3.5-flash", "le plus cher doit être en dernier"
+    retenus = [m for m in DEFAULT_MODEL_PRIORITY if m not in MODELES_DE_REPLI]
+    couts = [PRIX_PAR_MTOK[m] for m in retenus]
+    assert couts == sorted(couts), f"cascade non triée par coût : {retenus}"
+    assert retenus[0] == "gemini-3.1-flash-lite"
+
+
+def test_les_modeles_de_repli_sont_en_fin_de_cascade():
+    """Sollicités seulement si aucun modèle Gemini n'est disponible."""
+    from processors.gemini_processor import DEFAULT_MODEL_PRIORITY
+
+    assert DEFAULT_MODEL_PRIORITY[-2:] == list(MODELES_DE_REPLI)
 
 
 def test_a_prix_egal_le_modele_stable_precede_le_preview():
@@ -507,7 +520,7 @@ def test_version_perimee_reapplique_lordre_par_defaut():
     ]
 
     assert merge_model_priority(ordre_stocke_en_juillet, 0) == DEFAULT_MODEL_PRIORITY
-    assert merge_model_priority(ordre_stocke_en_juillet, 2) == DEFAULT_MODEL_PRIORITY
+    assert merge_model_priority(ordre_stocke_en_juillet, 3) == DEFAULT_MODEL_PRIORITY
 
 
 def test_version_a_jour_respecte_lordre_choisi_dans_ladmin():
@@ -533,7 +546,7 @@ def test_purge_les_modeles_inconnus_et_insere_les_nouveaux():
         "gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-3-flash-preview",
         "gemma-4-31b-it", "gemma-4-26b-a4b-it",
     }
-    assert resultat[-1] == "gemini-3.5-flash", "les modèles absents s'insèrent en tête"
+    assert resultat[0] != "gemini-3.5-flash", "les modèles absents s'insèrent en tête"
 
 
 # ─── Motif de la montée en gamme ──────────────────────────────────────────────
@@ -613,3 +626,68 @@ def test_depassement_et_anomalie_sont_journalises_differemment(monkeypatch, capl
     journal = caplog.text
     assert "dépassement sur sur-quota" in journal
     assert "anomalie sur inconnu" in journal
+
+
+# ─── 429 de débit vs 429 de facturation ───────────────────────────────────────
+# Régression : le marqueur « billing » était trop large. TOUS les 429 de Gemini
+# contiennent « check your plan and billing details », y compris un simple
+# dépassement de débit — la cascade s'interrompait donc à tort au premier modèle.
+
+MESSAGE_429_DEBIT_REEL = (
+    "429 You exceeded your current quota, please check your plan and billing details. "
+    "For more information on this error, head to: "
+    "https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, "
+    "head to: https://ai.dev/rate-limit. * Quota exceeded for metric: "
+    "generativelanguage.googleapis.com/generate_content_free_tier_requests"
+)
+
+
+def test_un_429_de_debit_nest_pas_pris_pour_un_compte_bloque(monkeypatch):
+    """Message réel de production : doit faire monter d'un cran, pas tout arrêter."""
+    from unittest.mock import MagicMock
+    from processors import gemini_processor
+    from google.api_core import exceptions as gexc
+
+    appels = []
+
+    def fake_model(model_name, *a, **k):
+        appels.append(model_name)
+        model = MagicMock()
+        if model_name == "sature":
+            model.generate_content = MagicMock(
+                side_effect=gexc.ResourceExhausted(MESSAGE_429_DEBIT_REEL))
+        else:
+            response = MagicMock()
+            response.text = '{"ok": true}'
+            model.generate_content = MagicMock(return_value=response)
+        return model
+
+    monkeypatch.setattr(gemini_processor.genai, "GenerativeModel", fake_model)
+
+    assert gemini_processor._call_llm("prompt", ["sature", "suivant"]) == '{"ok": true}'
+    assert appels == ["sature", "suivant"], "la cascade a été interrompue à tort"
+
+
+def test_le_message_de_debit_ne_parle_pas_de_facturation():
+    """Le libellé ne doit pas envoyer l'utilisateur recharger un compte crédité."""
+    from processors import gemini_processor
+    from google.api_core import exceptions as gexc
+
+    describe = gemini_processor._describe_llm_error(
+        gexc.ResourceExhausted(MESSAGE_429_DEBIT_REEL))
+
+    assert "FACTURATION BLOQUÉE" not in describe
+    assert "DÉBIT OU QUOTA DÉPASSÉ" in describe
+
+
+def test_le_vrai_message_de_facturation_reste_detecte():
+    """Le cas d'origine ne doit pas régresser."""
+    from processors import gemini_processor
+    from google.api_core import exceptions as gexc
+
+    exc = gexc.ResourceExhausted(
+        "429 Your prepayment credits are depleted. Please go to AI Studio at "
+        "https://ai.studio/projects to manage your project and billing.")
+
+    assert gemini_processor._is_account_level_failure(exc, 429) is True
+    assert "FACTURATION BLOQUÉE" in gemini_processor._describe_llm_error(exc)

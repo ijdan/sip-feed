@@ -12,11 +12,11 @@ logger = logging.getLogger(__name__)
 
 # Doit rester aligné sur app/routers/admin.py et collector/processors/gemini_processor.py.
 DEFAULT_MODEL_PRIORITY = [
-    "gemma-4-26b-a4b-it",      # 0,07 $ / 0,30 $
-    "gemma-4-31b-it",          # 0,09 $ / 0,34 $
-    "gemini-3.1-flash-lite",   # 0,25 $ / 1,50 $ — GA
-    "gemini-3-flash-preview",  # 0,25 $ / 1,50 $ — preview
-    "gemini-3.5-flash",        # 1,50 $ / 9,00 $
+    "gemini-3.1-flash-lite",   # 0,25 $ / 1,50 $ — GA, cheval de trait
+    "gemini-3-flash-preview",  # 0,25 $ / 1,50 $ — même prix, preview
+    "gemini-3.5-flash",        # 1,50 $ / 9,00 $ — qualité max
+    "gemma-4-31b-it",          # 0,09 $ / 0,34 $ — repli
+    "gemma-4-26b-a4b-it",      # 0,07 $ / 0,30 $ — dernier recours
 ]
 
 PROMPT_VERSION = "linkedin-v3"

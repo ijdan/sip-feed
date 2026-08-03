@@ -14,6 +14,12 @@ from pathlib import Path
 from app.auth.google_oauth import require_admin
 from app.db.firestore import get_db
 from app.config import settings
+# Source unique côté backend de la liste de modèles et de sa résolution.
+# La liste jumelle du collector est dans collector/processors/gemini_processor.py.
+from app.services.article_summarizer import (
+    DEFAULT_MODEL_PRIORITY,
+    resolve_model_priority,
+)
 
 # Chemin vers le collector (relatif au projet)
 COLLECTOR_DIR = Path(__file__).resolve().parents[3] / "collector"
@@ -44,22 +50,10 @@ CLOUD_RUN_JOB_URL = (
 )
 
 
-# Source unique côté backend — voir app/services/article_summarizer.py.
-# La liste jumelle du collector est dans collector/processors/gemini_processor.py.
-from app.services.article_summarizer import (
-    DEFAULT_MODEL_PRIORITY,
-    MODEL_PRIORITY_VERSION,
-    merge_model_priority,
-)
-
 class GlobalSettings(BaseModel):
     llm_enabled: bool = True
     thinking_enabled: bool = True
     model_priority: list[str] = DEFAULT_MODEL_PRIORITY
-    # Défaut = version courante : un PUT qui omettrait le champ ne doit pas
-    # rejouer la migration et écraser l'ordre choisi dans l'admin. La détection
-    # d'un document périmé se fait sur le Firestore brut, pas sur ce défaut.
-    model_priority_version: int = MODEL_PRIORITY_VERSION
     gmail_lookback_days: int = 1
     retention_days: int = 0
     interest: str = ""
@@ -85,19 +79,9 @@ def get_settings(_: dict = Depends(require_admin)):
     if not doc.exists:
         return GlobalSettings()
     data = doc.to_dict()
-    # Même règle que le collector et que le résumé à la demande : si la version
-    # stockée est périmée, l'ordre par défaut s'applique une fois, puis le choix
-    # fait ici redevient prioritaire.
-    stored = merge_model_priority(
-        data.get("model_priority", []), data.get("model_priority_version", 0)
-    )
-    data["model_priority"] = stored
-    data["model_priority_version"] = MODEL_PRIORITY_VERSION
-    # Persiste la liste nettoyée et la version appliquée
-    db.collection("settings").document("global").update({
-        "model_priority": stored,
-        "model_priority_version": MODEL_PRIORITY_VERSION,
-    })
+    # L'ordre affiché est exactement celui stocké : le GET ne réécrit rien.
+    # Seul le PUT (réordonnancement par l'admin) modifie model_priority.
+    data["model_priority"] = resolve_model_priority(data.get("model_priority"))
     return GlobalSettings(**data)
 
 

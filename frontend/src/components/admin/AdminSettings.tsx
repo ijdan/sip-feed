@@ -29,9 +29,6 @@ interface Settings {
   llm_enabled: boolean;
   thinking_enabled: boolean;
   model_priority: string[];
-  // Renvoyé tel quel au PUT : sans lui, l'ordre par défaut du code serait
-  // réappliqué à la sauvegarde suivante et écraserait le choix de l'admin.
-  model_priority_version: number;
   gmail_lookback_days: number;
   retention_days: number;
   interest: string;

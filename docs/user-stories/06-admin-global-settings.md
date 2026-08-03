@@ -65,8 +65,8 @@ Liste ordonnée des modèles connus avec boutons ▲▼ pour réordonner. Chaque
 
 **Règles métier**
 - Liste canonique `DEFAULT_MODEL_PRIORITY`, dupliquée 3x — cf. CLAUDE.md. Elle est **triée par coût croissant parmi les modèles qui tiennent la qualité attendue** : on sollicite le moins cher d'abord et on ne monte en gamme — donc en prix — que si le modèle courant refuse. À prix égal, le modèle GA passe devant le preview. Les Gemma sont les moins chers du catalogue mais rendent des descriptions trop courtes pour la fiche article (4 à 6 phrases attendues) : ils restent en **repli de dernier recours**.
-- Au GET, les modèles inconnus stockés sont nettoyés, les nouveaux sont insérés **en tête** automatiquement.
-- L'ordre stocké fait autorité sur la constante. Changer l'ordre par défaut n'a d'effet sur un projet existant que si `MODEL_PRIORITY_VERSION` est incrémentée : la nouvelle liste s'applique alors **une seule fois**, puis le choix de l'admin redevient prioritaire.
+- Le GET est en **lecture seule** : il restitue l'ordre stocké sans le réécrire. Seul le PUT (boutons ▲▼) modifie `model_priority`. Un modèle hors catalogue est signalé dans les logs mais reste sollicité.
+- **L'ordre choisi ici est appliqué littéralement à chaque appel LLM.** Aucune déduction du code : ni tri, ni purge, ni insertion. Modifier `DEFAULT_MODEL_PRIORITY` n'a aucun effet sur un projet existant — cette constante n'amorce qu'un projet neuf, quand aucun ordre n'a encore été choisi.
 - Motifs de montée d'un cran, journalisés distinctement dans le rapport d'exécution :
   - **dépassement** (429 de quota ou de débit) → cas nominal, c'est la raison d'être de la cascade ;
   - **anomalie** (404 modèle inconnu, 400 requête invalide, réponse vide ou non conforme au JSON demandé) → on monte aussi, mais c'est un défaut à corriger ;

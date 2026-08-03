@@ -507,51 +507,48 @@ def test_backend_et_collector_partagent_le_meme_ordre():
     bloc = re.search(r"DEFAULT_MODEL_PRIORITY = \[(.*?)\]", source, re.S).group(1)
     assert re.findall(r'"([^"]+)"', bloc) == DEFAULT_MODEL_PRIORITY, "le backend a divergé du collector"
 
-    version = re.search(r"MODEL_PRIORITY_VERSION = (\d+)", source).group(1)
-    from processors.gemini_processor import MODEL_PRIORITY_VERSION
-    assert int(version) == MODEL_PRIORITY_VERSION, "les versions backend/collector divergent"
-
     assert "DEFAULT_MODEL_PRIORITY = [" not in (racine / "backend/app/routers/admin.py").read_text(), \
         "admin.py doit importer la liste, pas la redéfinir"
 
 
-def test_version_perimee_reapplique_lordre_par_defaut():
-    """Le cœur du correctif : un projet existant doit recevoir le nouvel ordre."""
-    from processors.gemini_processor import merge_model_priority, DEFAULT_MODEL_PRIORITY
-
-    ordre_stocke_en_juillet = [
-        "gemini-3.5-flash", "gemini-3-flash-preview", "gemini-3.1-flash-lite",
-        "gemma-4-31b-it", "gemma-4-26b-a4b-it",
-    ]
-
-    assert merge_model_priority(ordre_stocke_en_juillet, 0) == DEFAULT_MODEL_PRIORITY
-    assert merge_model_priority(ordre_stocke_en_juillet, 3) == DEFAULT_MODEL_PRIORITY
-
-
-def test_version_a_jour_respecte_lordre_choisi_dans_ladmin():
-    """Une fois la migration passée, le choix de l'utilisateur redevient roi."""
-    from processors.gemini_processor import merge_model_priority, MODEL_PRIORITY_VERSION
+def test_lordre_de_ladmin_est_applique_litteralement():
+    """Règle absolue : l'ordre choisi dans la page admin est utilisé tel quel."""
+    from processors.gemini_processor import resolve_model_priority
 
     choix_admin = [
-        "gemini-3.5-flash", "gemma-4-31b-it", "gemini-3.1-flash-lite",
-        "gemini-3-flash-preview", "gemma-4-26b-a4b-it",
+        "gemini-3.5-flash", "gemma-4-26b-a4b-it", "gemini-3.1-flash-lite",
+        "gemini-3-flash-preview", "gemma-4-31b-it",
     ]
-    assert merge_model_priority(choix_admin, MODEL_PRIORITY_VERSION) == choix_admin
+    assert resolve_model_priority(choix_admin) == choix_admin
 
 
-def test_purge_les_modeles_inconnus_et_insere_les_nouveaux():
-    """Comportement historique conservé pour une version à jour."""
-    from processors.gemini_processor import merge_model_priority, MODEL_PRIORITY_VERSION
+def test_aucun_modele_nest_insere_ni_retire():
+    """Ni tri, ni purge, ni insertion : le code ne déduit rien."""
+    from processors.gemini_processor import resolve_model_priority
 
-    resultat = merge_model_priority(
-        ["modele-retire-du-catalogue", "gemini-3.5-flash"], MODEL_PRIORITY_VERSION
-    )
-    assert "modele-retire-du-catalogue" not in resultat
-    assert set(resultat) == {
-        "gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-3-flash-preview",
-        "gemma-4-31b-it", "gemma-4-26b-a4b-it",
-    }
-    assert resultat[0] != "gemini-3.5-flash", "les modèles absents s'insèrent en tête"
+    # Un seul modèle choisi : on ne complète pas la liste.
+    assert resolve_model_priority(["gemini-3.5-flash"]) == ["gemini-3.5-flash"]
+
+    # Un modèle hors catalogue est conservé — c'est le choix de l'admin.
+    exotique = ["modele-maison", "gemini-3.1-flash-lite"]
+    assert resolve_model_priority(exotique) == exotique
+
+
+def test_liste_vide_amorce_sur_le_defaut():
+    """Seul cas où le code décide : un projet neuf, sans ordre encore choisi."""
+    from processors.gemini_processor import resolve_model_priority, DEFAULT_MODEL_PRIORITY
+
+    assert resolve_model_priority([]) == DEFAULT_MODEL_PRIORITY
+    assert resolve_model_priority(None) == DEFAULT_MODEL_PRIORITY
+
+
+def test_resolve_ne_renvoie_pas_la_constante_elle_meme():
+    """L'appelant ne doit pas pouvoir muter DEFAULT_MODEL_PRIORITY par accident."""
+    from processors.gemini_processor import resolve_model_priority, DEFAULT_MODEL_PRIORITY
+
+    resultat = resolve_model_priority(None)
+    resultat.append("intrus")
+    assert "intrus" not in DEFAULT_MODEL_PRIORITY
 
 
 # ─── Motif de la montée en gamme ──────────────────────────────────────────────

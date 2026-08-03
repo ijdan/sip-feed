@@ -538,35 +538,20 @@ def _mock_db_with_settings(data: dict):
     return mock_db
 
 
-def test_get_model_priority_respecte_lordre_choisi_dans_ladmin():
-    """Version à jour : l'ordre stocké fait autorité, purgé des modèles inconnus."""
-    from app.services.article_summarizer import get_model_priority, MODEL_PRIORITY_VERSION
+def test_get_model_priority_applique_lordre_de_ladmin_litteralement():
+    """Le résumé à la demande utilise exactement l'ordre de la page admin."""
+    from app.services.article_summarizer import get_model_priority
 
     choix_admin = ["gemini-3.5-flash", "gemini-3.1-flash-lite"]
-    result = get_model_priority(_mock_db_with_settings({
-        "model_priority": choix_admin + ["modele-retire-du-catalogue"],
-        "model_priority_version": MODEL_PRIORITY_VERSION,
-    }))
+    result = get_model_priority(_mock_db_with_settings({"model_priority": choix_admin}))
 
-    assert result[-2:] == choix_admin, "l'ordre de l'admin doit être préservé"
-    assert "modele-retire-du-catalogue" not in result
+    assert result == choix_admin
 
 
-def test_get_model_priority_applique_la_migration_comme_la_page_admin():
-    """Version périmée : même ordre que le collector et que la page admin.
-
-    Régression : cette fonction retournait l'ordre brut de Firestore, donc le
-    bouton « Régénérer le résumé IA » pouvait solliciter un autre modèle que
-    la collecte tant que la page admin n'avait pas été ouverte.
-    """
+def test_get_model_priority_amorce_sur_le_defaut_si_rien_de_choisi():
     from app.services.article_summarizer import get_model_priority, DEFAULT_MODEL_PRIORITY
 
-    result = get_model_priority(_mock_db_with_settings({
-        "model_priority": ["gemini-3.5-flash", "gemma-4-31b-it"],  # ordre de juillet
-        # pas de model_priority_version → document périmé
-    }))
-
-    assert result == DEFAULT_MODEL_PRIORITY
+    assert get_model_priority(_mock_db_with_settings({})) == DEFAULT_MODEL_PRIORITY
 
 
 def test_get_model_priority_uses_default_when_missing():

@@ -21,12 +21,6 @@ DEFAULT_MODEL_PRIORITY = [
     "gemma-4-26b-a4b-it",      # 0,07 $ / 0,30 $ — dernier recours
 ]
 
-# À incrémenter à CHAQUE changement de l'ordre par défaut ci-dessus.
-# Sans ce marqueur, l'ordre stocké en Firestore l'emporte pour toujours et
-# modifier DEFAULT_MODEL_PRIORITY reste sans effet sur un projet existant
-# (c'est ce qui est arrivé à la mise à jour de juillet 2026).
-MODEL_PRIORITY_VERSION = 4
-
 CATEGORIES = ["IA", "DevOps", "Cloud", "Sécurité", "Dev", "IT", "Autre"]
 
 
@@ -49,22 +43,30 @@ MAX_ERROR_DETAIL = 300                  # chars max du message d'erreur conserv�
 logger = logging.getLogger(__name__)
 
 
-def merge_model_priority(stored: list[str], stored_version: int = 0) -> list[str]:
-    """Concilie l'ordre choisi dans l'admin et l'ordre par défaut du code.
+def resolve_model_priority(stored: list[str] | None) -> list[str]:
+    """Retourne l'ordre à appliquer — **littéralement celui choisi dans l'admin**.
 
-    - version stockée périmée → l'ordre par défaut s'applique (une seule fois),
-      sinon un changement de cascade côté code resterait sans effet en prod ;
-    - sinon on respecte l'ordre de l'admin, en purgeant les modèles inconnus
-      et en insérant les nouveaux en tête.
+    Aucune réécriture : pas de tri, pas d'insertion de modèle, pas de purge.
+    L'ordre stocké en Firestore par la page admin fait autorité et est
+    sollicité tel quel à chaque appel LLM. `DEFAULT_MODEL_PRIORITY` ne sert
+    qu'à amorcer un projet neuf, quand aucun ordre n'a encore été choisi.
+
+    Un modèle inconnu du catalogue est signalé mais tout de même sollicité :
+    c'est un choix de l'administrateur, pas au code de le censurer.
     """
-    if stored_version < MODEL_PRIORITY_VERSION:
+    if not stored:
+        logger.info("Aucun ordre de modèles en base — amorçage sur la liste par défaut.")
         return list(DEFAULT_MODEL_PRIORITY)
 
-    connus = [m for m in stored if m in DEFAULT_MODEL_PRIORITY]
-    for model in reversed(DEFAULT_MODEL_PRIORITY):
-        if model not in connus:
-            connus.insert(0, model)
-    return connus
+    inconnus = [m for m in stored if m not in DEFAULT_MODEL_PRIORITY]
+    if inconnus:
+        logger.warning(
+            f"Modèle(s) hors catalogue dans l'ordre choisi : {', '.join(inconnus)}. "
+            "Ils seront sollicités quand même — les retirer depuis la page admin "
+            "s'ils n'existent plus."
+        )
+    return list(stored)
+
 
 # Diagnostic des échecs LLM. Sans ça, tous les échecs remontaient comme
 # « quota épuisé » alors que la cause réelle est le plus souvent ailleurs

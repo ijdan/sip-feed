@@ -20,27 +20,29 @@ DEFAULT_MODEL_PRIORITY = [
     "gemma-4-26b-a4b-it",      # 0,07 $ / 0,30 $ — dernier recours
 ]
 
-# À incrémenter à CHAQUE changement de l'ordre par défaut ci-dessus, en même
-# temps que la constante jumelle du collector.
-MODEL_PRIORITY_VERSION = 4
+def resolve_model_priority(stored: list[str] | None) -> list[str]:
+    """Retourne l'ordre à appliquer — **littéralement celui choisi dans l'admin**.
 
+    Jumelle de la fonction du collector. Aucune réécriture : pas de tri, pas d'insertion de modèle, pas de purge.
+    L'ordre stocké en Firestore par la page admin fait autorité et est
+    sollicité tel quel à chaque appel LLM. `DEFAULT_MODEL_PRIORITY` ne sert
+    qu'à amorcer un projet neuf, quand aucun ordre n'a encore été choisi.
 
-def merge_model_priority(stored: list[str], stored_version: int = 0) -> list[str]:
-    """Concilie l'ordre choisi dans l'admin et l'ordre par défaut du code.
-
-    Jumelle de `collector/processors/gemini_processor.merge_model_priority`.
-    Tous les lecteurs de `model_priority` doivent passer par ici, sinon ils
-    divergent de ce qu'affiche la page admin tant que celle-ci n'a pas été
-    ouverte (c'est elle qui persiste la migration).
+    Un modèle inconnu du catalogue est signalé mais tout de même sollicité :
+    c'est un choix de l'administrateur, pas au code de le censurer.
     """
-    if stored_version < MODEL_PRIORITY_VERSION:
+    if not stored:
+        logger.info("Aucun ordre de modèles en base — amorçage sur la liste par défaut.")
         return list(DEFAULT_MODEL_PRIORITY)
 
-    connus = [m for m in stored if m in DEFAULT_MODEL_PRIORITY]
-    for model in reversed(DEFAULT_MODEL_PRIORITY):
-        if model not in connus:
-            connus.insert(0, model)
-    return connus
+    inconnus = [m for m in stored if m not in DEFAULT_MODEL_PRIORITY]
+    if inconnus:
+        logger.warning(
+            f"Modèle(s) hors catalogue dans l'ordre choisi : {', '.join(inconnus)}. "
+            "Ils seront sollicités quand même — les retirer depuis la page admin "
+            "s'ils n'existent plus."
+        )
+    return list(stored)
 
 
 PROMPT_VERSION = "linkedin-v3"
@@ -227,19 +229,13 @@ async def generate_summary(text: str, models_to_try: list[str]) -> tuple[str, st
 def get_model_priority(db) -> list[str]:
     """Lit model_priority depuis settings/global — même ordre que la page admin.
 
-    Passe par merge_model_priority : sans ça, le bouton « Régénérer le résumé
-    IA » utilisait l'ordre brut stocké en Firestore et pouvait solliciter un
-    autre modèle que le collector tant que la page admin n'avait pas été
-    ouverte pour persister la migration.
+    Applique l'ordre choisi dans l'admin, exactement comme la collecte.
     """
     try:
         doc = db.collection("settings").document("global").get()
         if doc.exists:
             data = doc.to_dict()
-            return merge_model_priority(
-                data.get("model_priority") or [],
-                data.get("model_priority_version", 0),
-            )
+            return resolve_model_priority(data.get("model_priority"))
     except Exception as exc:
         logger.warning(f"Impossible de lire model_priority : {exc}")
     return DEFAULT_MODEL_PRIORITY

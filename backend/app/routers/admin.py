@@ -47,17 +47,17 @@ CLOUD_RUN_JOB_URL = (
 # Le modèle le moins cher passe en premier (cf. collector/processors/gemini_processor.py,
 # où cette liste et sa version sont dupliquées — modifier les deux ensemble).
 DEFAULT_MODEL_PRIORITY = [
-    "gemini-3.1-flash-lite",   # 0,25 $ / 1,50 $ par Mtok
-    "gemini-3.5-flash",        # 1,50 $ / 9,00 $ par Mtok
-    "gemini-3-flash-preview",
-    "gemma-4-31b-it",
-    "gemma-4-26b-a4b-it",
+    "gemma-4-26b-a4b-it",      # 0,07 $ / 0,30 $
+    "gemma-4-31b-it",          # 0,09 $ / 0,34 $
+    "gemini-3.1-flash-lite",   # 0,25 $ / 1,50 $ — GA
+    "gemini-3-flash-preview",  # 0,25 $ / 1,50 $ — preview
+    "gemini-3.5-flash",        # 1,50 $ / 9,00 $
 ]
 
 # À incrémenter à CHAQUE changement de l'ordre par défaut : sans ce marqueur,
 # l'ordre stocké en Firestore l'emporte pour toujours et la constante ci-dessus
 # reste sans effet sur un projet existant.
-MODEL_PRIORITY_VERSION = 2
+MODEL_PRIORITY_VERSION = 3
 
 class GlobalSettings(BaseModel):
     llm_enabled: bool = True

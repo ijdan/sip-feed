@@ -7,24 +7,40 @@ import google.generativeai as genai
 
 genai.configure(api_key=os.environ["GEMINI_API_KEY"])
 
-# Le modèle le moins cher passe en premier : l'essentiel du travail (reformulation
-# de dépêches, extraction de mots-clés, rapport d'exécution) ne justifie pas un
-# modèle 6× plus cher au token. Gemini 3.5 Flash reste en second comme repli qualité.
+# Cascade triée par coût croissant (entrée / sortie en $ par million de tokens).
+# On sollicite le moins cher d'abord ; en cas de dépassement, on monte d'un cran.
+# À prix égal, le modèle stable passe devant le preview.
 DEFAULT_MODEL_PRIORITY = [
-    "gemini-3.1-flash-lite",   # 0,25 $ / 1,50 $ par Mtok
-    "gemini-3.5-flash",        # 1,50 $ / 9,00 $ par Mtok
-    "gemini-3-flash-preview",
-    "gemma-4-31b-it",
-    "gemma-4-26b-a4b-it",
+    "gemma-4-26b-a4b-it",      # 0,07 $ / 0,30 $
+    "gemma-4-31b-it",          # 0,09 $ / 0,34 $
+    "gemini-3.1-flash-lite",   # 0,25 $ / 1,50 $ — GA
+    "gemini-3-flash-preview",  # 0,25 $ / 1,50 $ — preview
+    "gemini-3.5-flash",        # 1,50 $ / 9,00 $
 ]
 
 # À incrémenter à CHAQUE changement de l'ordre par défaut ci-dessus.
 # Sans ce marqueur, l'ordre stocké en Firestore l'emporte pour toujours et
 # modifier DEFAULT_MODEL_PRIORITY reste sans effet sur un projet existant
 # (c'est ce qui est arrivé à la mise à jour de juillet 2026).
-MODEL_PRIORITY_VERSION = 2
+MODEL_PRIORITY_VERSION = 3
 
 CATEGORIES = ["IA", "DevOps", "Cloud", "Sécurité", "Dev", "IT", "Autre"]
+
+
+# Limites de contenu pour les prompts LLM
+MAX_ARTICLE_CONTENT_FOR_BATCH = 1500    # chars max par article dans le prompt batch
+MAX_GMAIL_CONTENT_FOR_PROMPT = 50_000  # chars max pour l'extraction Gmail
+MAX_SYNTHESIS_INPUT = 180_000           # chars max pour le prompt de synthèse
+MAX_REPORT_LOGS = 8_000                 # chars max des logs pour le rapport
+FALLBACK_SHORT_DESC_LENGTH = 200        # chars max short_description (fallback brut)
+FALLBACK_LONG_DESC_LENGTH = 1_000       # chars max long_description (fallback brut)
+LLM_TEMPERATURE = 0.4                   # Température génération LLM
+LLM_MAX_TOKENS_BATCH = 60_000           # Max tokens pour batch d'articles
+LLM_MAX_TOKENS_SYNTHESIS = 8_000        # Max tokens pour la synthèse
+TITLE_LOG_MAX_LENGTH = 60               # Longueur max des titres dans les logs
+MAX_ERROR_DETAIL = 300                  # chars max du message d'erreur conservé dans les logs
+
+logger = logging.getLogger(__name__)
 
 
 def merge_model_priority(stored: list[str], stored_version: int = 0) -> list[str]:
@@ -43,21 +59,6 @@ def merge_model_priority(stored: list[str], stored_version: int = 0) -> list[str
         if model not in connus:
             connus.insert(0, model)
     return connus
-
-# Limites de contenu pour les prompts LLM
-MAX_ARTICLE_CONTENT_FOR_BATCH = 1500    # chars max par article dans le prompt batch
-MAX_GMAIL_CONTENT_FOR_PROMPT = 50_000  # chars max pour l'extraction Gmail
-MAX_SYNTHESIS_INPUT = 180_000           # chars max pour le prompt de synthèse
-MAX_REPORT_LOGS = 8_000                 # chars max des logs pour le rapport
-FALLBACK_SHORT_DESC_LENGTH = 200        # chars max short_description (fallback brut)
-FALLBACK_LONG_DESC_LENGTH = 1_000       # chars max long_description (fallback brut)
-LLM_TEMPERATURE = 0.4                   # Température génération LLM
-LLM_MAX_TOKENS_BATCH = 60_000           # Max tokens pour batch d'articles
-LLM_MAX_TOKENS_SYNTHESIS = 8_000        # Max tokens pour la synthèse
-TITLE_LOG_MAX_LENGTH = 60               # Longueur max des titres dans les logs
-MAX_ERROR_DETAIL = 300                  # chars max du message d'erreur conservé dans les logs
-
-logger = logging.getLogger(__name__)
 
 # Diagnostic des échecs LLM. Sans ça, tous les échecs remontaient comme
 # « quota épuisé » alors que la cause réelle est le plus souvent ailleurs
@@ -100,6 +101,17 @@ def _is_account_level_failure(exc: Exception, code: int | None) -> bool:
     return any(marker in message for marker in _BILLING_MARKERS)
 
 
+def _is_quota_failure(exc: Exception, code: int | None) -> bool:
+    """Vrai si le modèle a refusé pour dépassement de quota ou de débit.
+
+    C'est le cas nominal de la cascade : on monte d'un cran en gamme, donc en
+    prix. À distinguer d'une anomalie (modèle inconnu, requête invalide,
+    réponse illisible), qui fait aussi monter d'un cran mais signale un défaut
+    à corriger — et du blocage de compte, où aucun modèle ne peut aboutir.
+    """
+    return code == 429 and not _is_account_level_failure(exc, code)
+
+
 def _http_code(exc: Exception) -> int | None:
     """Code HTTP porté par une exception google-api-core, s'il y en a un."""
     code = getattr(exc, "code", None)
@@ -133,6 +145,12 @@ def _entete_echec(errors: list[str], interrompu: bool) -> str:
     if interrompu:
         return "le compte est bloqué, cascade interrompue au premier modèle"
     return f"les {len(errors)} modèle(s) de la cascade ont échoué"
+
+
+def _log_montee(etape: str, model_name: str, exc: Exception, reason: str) -> None:
+    """Journalise la montée d'un cran en distinguant le cas nominal du défaut."""
+    motif = "dépassement" if _is_quota_failure(exc, _http_code(exc)) else "anomalie"
+    logger.warning(f"{etape} : {motif} sur {model_name} — montée d'un cran : {reason}")
 
 
 def _stop_cascade(exc: Exception, etape: str, restants: list[str]) -> bool:
@@ -359,10 +377,17 @@ def _generate(model_name: str, prompt: str, thinking: bool | None):
 
 
 def _call_llm(prompt: str, models_to_try: list[str], thinking: bool = True) -> str:
-    """Appelle le LLM en cascade jusqu'au premier modèle disponible.
+    """Appelle les modèles dans l'ordre reçu — trié du moins cher au plus cher.
 
-    Chaque échec est journalisé avec son code HTTP et son message brut : c'est
-    la seule façon de distinguer un vrai 429 d'une erreur de configuration.
+    On monte d'un cran (donc en prix) dès qu'un modèle refuse. Le motif de la
+    montée est journalisé distinctement :
+    - dépassement de quota ou de débit → cas nominal, c'est le rôle de la cascade ;
+    - anomalie (modèle inconnu, requête invalide, réponse illisible ou non-JSON)
+      → on monte aussi, mais c'est un défaut à corriger ;
+    - blocage du compte → arrêt immédiat, aucun modèle ne peut aboutir.
+
+    La validité du JSON est vérifiée **ici** : une réponse malformée doit faire
+    monter d'un cran, pas faire échouer tout le run en aval.
     """
     global _thinking_unsupported_logged
 
@@ -394,11 +419,24 @@ def _call_llm(prompt: str, models_to_try: list[str], thinking: bool = True) -> s
                 text = text.split("```")[1]
                 if text.startswith("json"):
                     text = text[4:]
+            text = text.strip()
+
+            # Un JSON illisible est un échec du modèle, pas du run : on doit
+            # pouvoir monter d'un cran. Sans ça, un petit modèle bavard fait
+            # tomber toute la collecte en articles bruts.
+            try:
+                json.loads(text)
+            except json.JSONDecodeError as exc:
+                raise ValueError(
+                    f"réponse non conforme au JSON demandé ({exc.msg} "
+                    f"ligne {exc.lineno}, colonne {exc.colno})"
+                ) from exc
+
             logger.info(f"Modèle utilisé avec succès : {model_name}")
-            return text.strip()
+            return text
         except Exception as exc:
             reason = _describe_llm_error(exc)
-            logger.warning(f"Modèle {model_name} en échec — {reason}")
+            _log_montee("Cascade LLM", model_name, exc, reason)
             failures.append((model_name, reason))
 
             if _stop_cascade(exc, "Cascade LLM", models_to_try[len(failures):]):
@@ -554,7 +592,7 @@ def select_relevant_articles(articles: list[dict], interest: str, model_priority
                         f"{usage['total_tokens']} tokens")
             return {"selected_ids": ids, "usage": usage}
         except Exception as e:
-            logger.warning(f"Sélection : {model_name} en échec — {_describe_llm_error(e)}")
+            _log_montee("Sélection", model_name, e, _describe_llm_error(e))
             if _stop_cascade(e, "Sélection", models_to_try[rang + 1:]):
                 break
 
@@ -601,7 +639,7 @@ def generate_synthesis(articles: list[dict], interest: str, model_priority: list
             }
         except Exception as e:
             reason = _describe_llm_error(e)
-            logger.warning(f"Synthèse : {model_name} en échec — {reason}")
+            _log_montee("Synthèse", model_name, e, reason)
             errors.append(f"- **{model_name}** : {reason}")
             if _stop_cascade(e, "Synthèse", models_to_try[len(errors):]):
                 interrompu = True
@@ -673,7 +711,7 @@ def generate_run_report(logs: str, model_priority: list[str] | None = None) -> s
             return _extract_response_text(response, model_name)
         except Exception as e:
             reason = _describe_llm_error(e)
-            logger.warning(f"Rapport : modèle {model_name} en échec — {reason}")
+            _log_montee("Rapport", model_name, e, reason)
             errors.append(f"- **{model_name}** : {reason}")
             if _stop_cascade(e, "Rapport", models_to_try[len(errors):]):
                 interrompu = True

@@ -456,13 +456,30 @@ def test_select_relevant_articles_interrompt_aussi_la_cascade(monkeypatch):
 # Régression : l'ordre stocké en Firestore l'emportait sans condition, si bien
 # qu'une modification de DEFAULT_MODEL_PRIORITY restait sans effet en prod.
 
-def test_le_modele_le_moins_cher_est_en_tete():
-    """Flash Lite (0,25 $/Mtok) doit précéder Flash (1,50 $/Mtok)."""
+# Coût entrée/sortie en $ par million de tokens, au 3 août 2026.
+PRIX_PAR_MTOK = {
+    "gemma-4-26b-a4b-it": (0.070, 0.300),
+    "gemma-4-31b-it": (0.090, 0.340),
+    "gemini-3.1-flash-lite": (0.250, 1.500),
+    "gemini-3-flash-preview": (0.250, 1.500),
+    "gemini-3.5-flash": (1.500, 9.000),
+}
+
+
+def test_la_cascade_est_triee_du_moins_cher_au_plus_cher():
+    """Règle de conception : on sollicite toujours le moins cher d'abord."""
     from processors.gemini_processor import DEFAULT_MODEL_PRIORITY
 
-    assert DEFAULT_MODEL_PRIORITY[0] == "gemini-3.1-flash-lite"
+    couts = [PRIX_PAR_MTOK[m] for m in DEFAULT_MODEL_PRIORITY]
+    assert couts == sorted(couts), f"cascade non triée par coût : {DEFAULT_MODEL_PRIORITY}"
+    assert DEFAULT_MODEL_PRIORITY[-1] == "gemini-3.5-flash", "le plus cher doit être en dernier"
+
+
+def test_a_prix_egal_le_modele_stable_precede_le_preview():
+    from processors.gemini_processor import DEFAULT_MODEL_PRIORITY
+
     assert DEFAULT_MODEL_PRIORITY.index("gemini-3.1-flash-lite") < \
-        DEFAULT_MODEL_PRIORITY.index("gemini-3.5-flash")
+        DEFAULT_MODEL_PRIORITY.index("gemini-3-flash-preview")
 
 
 def test_backend_et_collector_partagent_le_meme_ordre():
@@ -488,8 +505,9 @@ def test_version_perimee_reapplique_lordre_par_defaut():
         "gemini-3.5-flash", "gemini-3-flash-preview", "gemini-3.1-flash-lite",
         "gemma-4-31b-it", "gemma-4-26b-a4b-it",
     ]
+
     assert merge_model_priority(ordre_stocke_en_juillet, 0) == DEFAULT_MODEL_PRIORITY
-    assert merge_model_priority(ordre_stocke_en_juillet, 1) == DEFAULT_MODEL_PRIORITY
+    assert merge_model_priority(ordre_stocke_en_juillet, 2) == DEFAULT_MODEL_PRIORITY
 
 
 def test_version_a_jour_respecte_lordre_choisi_dans_ladmin():
@@ -497,7 +515,7 @@ def test_version_a_jour_respecte_lordre_choisi_dans_ladmin():
     from processors.gemini_processor import merge_model_priority, MODEL_PRIORITY_VERSION
 
     choix_admin = [
-        "gemma-4-31b-it", "gemini-3.1-flash-lite", "gemini-3.5-flash",
+        "gemini-3.5-flash", "gemma-4-31b-it", "gemini-3.1-flash-lite",
         "gemini-3-flash-preview", "gemma-4-26b-a4b-it",
     ]
     assert merge_model_priority(choix_admin, MODEL_PRIORITY_VERSION) == choix_admin
@@ -516,3 +534,82 @@ def test_purge_les_modeles_inconnus_et_insere_les_nouveaux():
         "gemma-4-31b-it", "gemma-4-26b-a4b-it",
     }
     assert resultat[-1] == "gemini-3.5-flash", "les modèles absents s'insèrent en tête"
+
+
+# ─── Motif de la montée en gamme ──────────────────────────────────────────────
+# La cascade est triée du moins cher au plus cher : on ne monte d'un cran que
+# lorsque le modèle courant refuse. Un JSON illisible doit compter comme un
+# refus — sinon un petit modèle bavard fait tomber tout le run.
+
+def test_json_malforme_fait_monter_dun_cran(monkeypatch):
+    """Le modèle bon marché répond du texte libre : on doit passer au suivant."""
+    from unittest.mock import MagicMock
+    from processors import gemini_processor
+
+    appels = []
+
+    def fake_model(model_name, *a, **k):
+        appels.append(model_name)
+        model = MagicMock()
+        response = MagicMock()
+        response.text = ("Bien sûr ! Voici les articles :" if model_name == "pas-cher"
+                         else '{"ok": true}')
+        model.generate_content = MagicMock(return_value=response)
+        return model
+
+    monkeypatch.setattr(gemini_processor.genai, "GenerativeModel", fake_model)
+
+    resultat = gemini_processor._call_llm("prompt", ["pas-cher", "plus-cher"])
+
+    assert resultat == '{"ok": true}'
+    assert appels == ["pas-cher", "plus-cher"], "la cascade n'est pas montée d'un cran"
+
+
+def test_json_malforme_partout_leve_une_erreur_de_cascade(monkeypatch):
+    """Si aucun modèle ne produit du JSON, l'échec doit être explicite."""
+    from unittest.mock import MagicMock
+    from processors import gemini_processor
+
+    model = MagicMock()
+    response = MagicMock()
+    response.text = "désolé, je ne peux pas"
+    model.generate_content = MagicMock(return_value=response)
+    monkeypatch.setattr(gemini_processor.genai, "GenerativeModel", lambda *a, **k: model)
+
+    with pytest.raises(gemini_processor.LLMCascadeError) as excinfo:
+        gemini_processor._call_llm("prompt", ["a", "b"])
+
+    assert "JSON" in str(excinfo.value)
+    assert len(excinfo.value.failures) == 2
+
+
+def test_depassement_et_anomalie_sont_journalises_differemment(monkeypatch, caplog):
+    """Le rapport doit distinguer une montée par conception d'un défaut à corriger."""
+    import logging
+    from unittest.mock import MagicMock
+    from processors import gemini_processor
+    from google.api_core import exceptions as gexc
+
+    erreurs = {
+        "sur-quota": gexc.ResourceExhausted("429 Quota exceeded for quota metric 'requests'"),
+        "inconnu": gexc.NotFound("404 model not found"),
+    }
+
+    def fake_model(model_name, *a, **k):
+        model = MagicMock()
+        if model_name in erreurs:
+            model.generate_content = MagicMock(side_effect=erreurs[model_name])
+        else:
+            response = MagicMock()
+            response.text = '{"ok": true}'
+            model.generate_content = MagicMock(return_value=response)
+        return model
+
+    monkeypatch.setattr(gemini_processor.genai, "GenerativeModel", fake_model)
+
+    with caplog.at_level(logging.WARNING):
+        gemini_processor._call_llm("prompt", ["sur-quota", "inconnu", "bon"])
+
+    journal = caplog.text
+    assert "dépassement sur sur-quota" in journal
+    assert "anomalie sur inconnu" in journal

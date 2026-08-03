@@ -5,11 +5,11 @@ import useSWR, { mutate } from "swr";
 const API = process.env.NEXT_PUBLIC_API_URL;
 
 const MODEL_LABELS: Record<string, { label: string; note?: string }> = {
-  "gemini-3.5-flash":        { label: "Gemini 3.5 Flash",     note: "Qualité max — 1,50 $/9,00 $ par Mtok" },
-  "gemini-3.1-flash-lite":   { label: "Gemini 3.1 Flash Lite",note: "Économique — 0,25 $/1,50 $ par Mtok" },
-  "gemini-3-flash-preview":  { label: "Gemini 3 Flash",       note: "Preview — fallback" },
-  "gemma-4-31b-it":          { label: "Gemma 4 31B",          note: "Open source — 31B" },
-  "gemma-4-26b-a4b-it":      { label: "Gemma 4 26B",          note: "Dernier recours" },
+  "gemma-4-26b-a4b-it":      { label: "Gemma 4 26B",          note: "0,07 $ / 0,30 $ par Mtok — le moins cher" },
+  "gemma-4-31b-it":          { label: "Gemma 4 31B",          note: "0,09 $ / 0,34 $ par Mtok" },
+  "gemini-3.1-flash-lite":   { label: "Gemini 3.1 Flash Lite",note: "0,25 $ / 1,50 $ par Mtok — GA" },
+  "gemini-3-flash-preview":  { label: "Gemini 3 Flash",       note: "0,25 $ / 1,50 $ par Mtok — preview" },
+  "gemini-3.5-flash":        { label: "Gemini 3.5 Flash",     note: "1,50 $ / 9,00 $ par Mtok — qualité max" },
 };
 
 async function apiFetch(path: string, token: string, options: RequestInit = {}) {
@@ -142,7 +142,7 @@ export default function AdminSettings({ token }: { token: string }) {
           <p className="text-sm font-medium text-gray-700">Priorité des modèles LLM</p>
           {saving && <span className="text-xs text-gray-400">Sauvegarde...</span>}
         </div>
-        <p className="text-xs text-gray-400">Le collector essaie les modèles dans l'ordre. Si le premier échoue (quota, modèle indisponible, erreur d'API), il passe au suivant. La cause exacte de chaque échec figure dans le rapport d'exécution.</p>
+        <p className="text-xs text-gray-400">Cascade triée du moins cher au plus cher. Le collector sollicite le premier ; en cas de dépassement de quota, il monte d'un cran. Un blocage de facturation arrête la cascade — aucun modèle ne peut aboutir. La cause exacte de chaque échec figure dans le rapport d'exécution.</p>
         <div className="space-y-2">
           {(settings.model_priority ?? []).map((modelId, i) => {
             const info = MODEL_LABELS[modelId] ?? { label: modelId };

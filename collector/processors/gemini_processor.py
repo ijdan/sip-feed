@@ -491,7 +491,7 @@ def extract_and_enrich_gmail(
     for i, content in enumerate(email_contents, 1):
         logger.info(f"  Traitement email {i}/{len(email_contents)} via LLM...")
         prompt = GMAIL_EXTRACTION_PROMPT.format(
-            content=content[:50000],
+            content=content[:MAX_GMAIL_CONTENT_FOR_PROMPT],
             categories=", ".join(CATEGORIES),
         )
         try:
@@ -723,23 +723,70 @@ Si aucune anomalie, indique-le explicitement.
 **Recommandations** (si pertinent)
 Suggestions courtes si des problèmes récurrents sont détectés.
 
-Sois factuel, concis. N'invente rien qui ne figure pas dans les logs.
+Règles de rédaction impératives :
+- Réponds UNIQUEMENT avec le rapport final en markdown, en commençant
+  directement par la ligne « **Sources sollicitées** ».
+- N'écris aucun préambule, aucun raisonnement, aucun brouillon, aucune
+  auto-correction, aucune reformulation de ces consignes. Ce que tu produis
+  est lu tel quel par un humain : tout texte hors du rapport est un défaut.
+- Ne cite jamais deux fois la même erreur. Si une erreur concerne plusieurs
+  modèles, mentionne-la une seule fois en listant les modèles concernés.
+- Tronque tout message d'erreur à sa première phrase utile.
+- Sois factuel et concis. N'invente rien qui ne figure pas dans les logs.
 """
+
+# Sections attendues dans le rapport, dans l'ordre. Servent aussi à nettoyer
+# la sortie des modèles qui restituent leur brouillon avant la réponse finale.
+_REPORT_SECTIONS = (
+    "**Sources sollicitées**",
+    "**Collecte emails**",
+    "**Traitement LLM**",
+    "**Résultat**",
+    "**Anomalies**",
+)
+
+REPORT_GENERATION_CONFIG = {
+    "temperature": 0.2,        # tâche de mise en forme, pas de créativité
+    "max_output_tokens": 4_000,
+}
+
+
+def _clean_report_output(text: str, model_name: str) -> str:
+    """Isole le rapport final dans la réponse du modèle.
+
+    Certains modèles restituent tout leur cheminement — consignes reformulées,
+    brouillons, « self-correction » — avant la version finale. On repart de la
+    DERNIÈRE occurrence de la première section : le vrai rapport est en fin de
+    réponse, les brouillons le précèdent.
+    """
+    depart = text.rfind(_REPORT_SECTIONS[0])
+    rapport = text[depart:].strip() if depart >= 0 else text.strip()
+
+    presentes = sum(1 for section in _REPORT_SECTIONS if section in rapport)
+    if presentes < 3:
+        raise ValueError(
+            f"{model_name} n'a pas produit un rapport exploitable "
+            f"({presentes} section(s) attendue(s) sur {len(_REPORT_SECTIONS)})"
+        )
+    return rapport
 
 
 def generate_run_report(logs: str, model_priority: list[str] | None = None) -> str:
     """Génère un rapport de synthèse de l'exécution via LLM."""
-    prompt = REPORT_PROMPT.format(logs=logs[:8000])
+    prompt = REPORT_PROMPT.format(logs=logs[:MAX_REPORT_LOGS])
     models_to_try = model_priority or DEFAULT_MODEL_PRIORITY
 
     errors = []
     interrompu = False
     for model_name in models_to_try:
         try:
-            m = genai.GenerativeModel(model_name)
+            m = genai.GenerativeModel(model_name, generation_config=REPORT_GENERATION_CONFIG)
             response = m.generate_content(prompt)
+            rapport = _clean_report_output(
+                _extract_response_text(response, model_name), model_name
+            )
             logger.info(f"Rapport généré par {model_name}")
-            return _extract_response_text(response, model_name)
+            return rapport
         except Exception as e:
             reason = _describe_llm_error(e)
             _log_montee("Rapport", model_name, e, reason)

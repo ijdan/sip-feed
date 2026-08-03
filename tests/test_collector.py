@@ -693,3 +693,96 @@ def test_le_vrai_message_de_facturation_reste_detecte():
 
     assert gemini_processor._is_account_level_failure(exc, 429) is True
     assert "FACTURATION BLOQUÉE" in gemini_processor._describe_llm_error(exc)
+
+
+# ─── Rapport d'exécution : brouillon du modèle ────────────────────────────────
+# Régression : certains modèles restituent leur cheminement (consignes
+# reformulées, brouillons, auto-corrections) avant la réponse finale. Le
+# rapport lu par l'administrateur devenait illisible.
+
+SORTIE_AVEC_BROUILLON = """Assistant writing a summary report of a technological watch collection.
+French. Structured, clear, concise, readable in 30 seconds, use emojis.
+
+    *   *Settings:* LLM=True, Thinking=True.
+    *   *Self-Correction:* The logs say "Synthèse sauvegardée". *Wait*, the logs
+        show "0 source(s) active(s)". I'll report what the log says.
+
+    *Structure draft:*
+    **Sources sollicitées**
+    - brouillon à jeter
+
+    *   Readable in 30s? Yes.
+Voici le rapport :
+
+**Sources sollicitées**
+* TLDR (gmail) : active
+
+**Collecte emails**
+* 3 emails, 12 articles extraits
+
+**Traitement LLM**
+* Modèle utilisé : gemini-3.1-flash-lite
+
+**Résultat**
+* 12 articles sauvegardés
+
+**Anomalies**
+* Aucune
+"""
+
+
+def test_le_brouillon_du_modele_est_retire_du_rapport():
+    from processors.gemini_processor import _clean_report_output
+
+    rapport = _clean_report_output(SORTIE_AVEC_BROUILLON, "modele-bavard")
+
+    assert rapport.startswith("**Sources sollicitées**")
+    assert "Self-Correction" not in rapport
+    assert "brouillon à jeter" not in rapport
+    assert "Readable in 30s" not in rapport
+    assert "12 articles sauvegardés" in rapport, "le vrai rapport doit être conservé"
+
+
+def test_une_reponse_sans_sections_est_un_echec_de_modele(monkeypatch):
+    """Pas de rapport exploitable : on doit monter d'un cran, pas publier du bruit."""
+    from unittest.mock import MagicMock
+    from processors import gemini_processor
+
+    appels = []
+
+    def fake_model(model_name, *a, **k):
+        appels.append(model_name)
+        model = MagicMock()
+        response = MagicMock()
+        response.text = ("Je réfléchis à la structure du rapport..." if model_name == "bavard"
+                         else SORTIE_AVEC_BROUILLON)
+        model.generate_content = MagicMock(return_value=response)
+        return model
+
+    monkeypatch.setattr(gemini_processor.genai, "GenerativeModel", fake_model)
+
+    rapport = gemini_processor.generate_run_report("des logs", ["bavard", "correct"])
+
+    assert appels == ["bavard", "correct"], "la cascade n'est pas montée d'un cran"
+    assert rapport.startswith("**Sources sollicitées**")
+
+
+def test_le_rapport_est_borne_en_taille():
+    """Le rapport doit rester lisible en 30 secondes."""
+    from processors.gemini_processor import REPORT_GENERATION_CONFIG
+
+    assert REPORT_GENERATION_CONFIG["max_output_tokens"] <= 4_000
+    assert REPORT_GENERATION_CONFIG["temperature"] <= 0.3, "mise en forme, pas création"
+
+
+def test_les_plafonds_de_troncature_sont_reellement_appliques():
+    """Régression : MAX_REPORT_LOGS et MAX_GMAIL_CONTENT_FOR_PROMPT étaient
+    déclarés mais le code utilisait des littéraux — les régler ne faisait rien."""
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[1]
+              / "collector/processors/gemini_processor.py").read_text()
+
+    assert "logs[:MAX_REPORT_LOGS]" in source
+    assert "content[:MAX_GMAIL_CONTENT_FOR_PROMPT]" in source
+    assert "[:8000]" not in source and "[:50000]" not in source

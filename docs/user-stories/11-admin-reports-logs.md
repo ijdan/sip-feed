@@ -22,7 +22,9 @@
 
 **Règles métier**
 - Toujours généré (peu importe la valeur de `interest` ou autres settings).
-- Les logs sont tronqués à 8000 caractères (constante `MAX_REPORT_LOGS`).
+- Les logs sont tronqués à 8000 caractères (constante `MAX_REPORT_LOGS`, réellement appliquée).
+- Le rapport est **nettoyé avant publication** : certains modèles restituent leur brouillon (consignes reformulées, auto-corrections) avant la réponse finale. `_clean_report_output()` repart de la dernière occurrence de « **Sources sollicitées** » et exige au moins 3 des 5 sections attendues ; sinon la réponse est traitée comme un échec du modèle et la cascade monte d'un cran.
+- Génération bornée : température 0,2 et 4000 tokens de sortie max — c'est une mise en forme, pas une création.
 - Si tous les modèles LLM échouent → message "⚠️ Rapport indisponible — tous les modèles LLM ont échoué :" suivi de la cause réelle par modèle (code HTTP + message de l'API). Ne jamais annoncer un quota sans un 429 effectivement reçu.
 - Le doc `reports/latest` écrase à chaque run (pas d'historique).
 

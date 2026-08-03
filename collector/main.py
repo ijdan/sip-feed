@@ -15,7 +15,7 @@ from scrapers.web_scraper import scrape_source
 from scrapers.gmail_reader import read_gmail_source
 from processors.gemini_processor import (
     enrich_articles_batch, save_raw_articles, generate_run_report,
-    merge_model_priority, DEFAULT_MODEL_PRIORITY, MODEL_PRIORITY_VERSION,
+    resolve_model_priority, DEFAULT_MODEL_PRIORITY,
     TITLE_LOG_MAX_LENGTH,
 )
 from processors.synthesis import run_synthesis
@@ -37,23 +37,13 @@ logging.getLogger().addHandler(_mem_handler)
 db = firestore.Client(project=os.environ.get("FIRESTORE_PROJECT_ID", "tech-news-aggregator-001"))
 
 
-# DEFAULT_MODEL_PRIORITY et MODEL_PRIORITY_VERSION vivent dans gemini_processor
-# (cf. import ci-dessus) — une seule définition côté collector.
+# DEFAULT_MODEL_PRIORITY vit dans gemini_processor (cf. import ci-dessus).
 
 def get_global_settings() -> dict:
     doc = db.collection("settings").document("global").get()
     data = doc.to_dict() if doc.exists else {}
-    # Purge les modèles inconnus, insère les nouveaux, et réapplique l'ordre
-    # par défaut si la version stockée est périmée.
-    stored_version = data.get("model_priority_version", 0)
-    data["model_priority"] = merge_model_priority(
-        data.get("model_priority", []), stored_version
-    )
-    if stored_version < MODEL_PRIORITY_VERSION:
-        logger.info(
-            f"Ordre des modèles réinitialisé sur la valeur par défaut du code "
-            f"(version {stored_version} → {MODEL_PRIORITY_VERSION}) : {data['model_priority']}"
-        )
+    # L'ordre choisi dans la page admin est appliqué tel quel — aucune réécriture.
+    data["model_priority"] = resolve_model_priority(data.get("model_priority"))
     data.setdefault("llm_enabled", True)
     data.setdefault("translation_enabled", True)
     return data

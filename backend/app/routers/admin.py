@@ -14,6 +14,12 @@ from pathlib import Path
 from app.auth.google_oauth import require_admin
 from app.db.firestore import get_db
 from app.config import settings
+# Source unique côté backend de la liste de modèles et de sa résolution.
+# La liste jumelle du collector est dans collector/processors/gemini_processor.py.
+from app.services.article_summarizer import (
+    DEFAULT_MODEL_PRIORITY,
+    resolve_model_priority,
+)
 
 # Chemin vers le collector (relatif au projet)
 COLLECTOR_DIR = Path(__file__).resolve().parents[3] / "collector"
@@ -44,29 +50,10 @@ CLOUD_RUN_JOB_URL = (
 )
 
 
-# Le modèle le moins cher passe en premier (cf. collector/processors/gemini_processor.py,
-# où cette liste et sa version sont dupliquées — modifier les deux ensemble).
-DEFAULT_MODEL_PRIORITY = [
-    "gemma-4-26b-a4b-it",      # 0,07 $ / 0,30 $
-    "gemma-4-31b-it",          # 0,09 $ / 0,34 $
-    "gemini-3.1-flash-lite",   # 0,25 $ / 1,50 $ — GA
-    "gemini-3-flash-preview",  # 0,25 $ / 1,50 $ — preview
-    "gemini-3.5-flash",        # 1,50 $ / 9,00 $
-]
-
-# À incrémenter à CHAQUE changement de l'ordre par défaut : sans ce marqueur,
-# l'ordre stocké en Firestore l'emporte pour toujours et la constante ci-dessus
-# reste sans effet sur un projet existant.
-MODEL_PRIORITY_VERSION = 3
-
 class GlobalSettings(BaseModel):
     llm_enabled: bool = True
     thinking_enabled: bool = True
     model_priority: list[str] = DEFAULT_MODEL_PRIORITY
-    # Défaut = version courante : un PUT qui omettrait le champ ne doit pas
-    # rejouer la migration et écraser l'ordre choisi dans l'admin. La détection
-    # d'un document périmé se fait sur le Firestore brut, pas sur ce défaut.
-    model_priority_version: int = MODEL_PRIORITY_VERSION
     gmail_lookback_days: int = 1
     retention_days: int = 0
     interest: str = ""
@@ -92,25 +79,9 @@ def get_settings(_: dict = Depends(require_admin)):
     if not doc.exists:
         return GlobalSettings()
     data = doc.to_dict()
-    stored_version = data.get("model_priority_version", 0)
-
-    if stored_version < MODEL_PRIORITY_VERSION:
-        # L'ordre par défaut du code vient de changer : il s'applique une fois,
-        # puis l'ordre choisi dans l'admin redevient prioritaire.
-        stored = list(DEFAULT_MODEL_PRIORITY)
-    else:
-        stored = [m for m in data.get("model_priority", []) if m in DEFAULT_MODEL_PRIORITY]
-        for model in reversed(DEFAULT_MODEL_PRIORITY):
-            if model not in stored:
-                stored.insert(0, model)
-
-    data["model_priority"] = stored
-    data["model_priority_version"] = MODEL_PRIORITY_VERSION
-    # Persiste la liste nettoyée et la version appliquée
-    db.collection("settings").document("global").update({
-        "model_priority": stored,
-        "model_priority_version": MODEL_PRIORITY_VERSION,
-    })
+    # L'ordre affiché est exactement celui stocké : le GET ne réécrit rien.
+    # Seul le PUT (réordonnancement par l'admin) modifie model_priority.
+    data["model_priority"] = resolve_model_priority(data.get("model_priority"))
     return GlobalSettings(**data)
 
 

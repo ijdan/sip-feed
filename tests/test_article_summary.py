@@ -525,22 +525,33 @@ def test_summary_prompt_roundtrip_and_reset(admin_token):
 
 # ─── get_model_priority ───────────────────────────────────────────────────────
 
-def test_get_model_priority_uses_firestore_value():
-    """get_model_priority retourne la valeur Firestore si elle existe."""
-    from app.services.article_summarizer import get_model_priority
-
+def _mock_db_with_settings(data: dict):
     mock_doc = MagicMock()
     mock_doc.exists = True
-    mock_doc.to_dict = MagicMock(return_value={"model_priority": ["modele-x", "modele-y"]})
+    mock_doc.to_dict = MagicMock(return_value=data)
 
     mock_collection = MagicMock()
     mock_collection.document.return_value.get.return_value = mock_doc
 
     mock_db = MagicMock()
     mock_db.collection.return_value = mock_collection
+    return mock_db
 
-    result = get_model_priority(mock_db)
-    assert result == ["modele-x", "modele-y"]
+
+def test_get_model_priority_applique_lordre_de_ladmin_litteralement():
+    """Le résumé à la demande utilise exactement l'ordre de la page admin."""
+    from app.services.article_summarizer import get_model_priority
+
+    choix_admin = ["gemini-3.5-flash", "gemini-3.1-flash-lite"]
+    result = get_model_priority(_mock_db_with_settings({"model_priority": choix_admin}))
+
+    assert result == choix_admin
+
+
+def test_get_model_priority_amorce_sur_le_defaut_si_rien_de_choisi():
+    from app.services.article_summarizer import get_model_priority, DEFAULT_MODEL_PRIORITY
+
+    assert get_model_priority(_mock_db_with_settings({})) == DEFAULT_MODEL_PRIORITY
 
 
 def test_get_model_priority_uses_default_when_missing():

@@ -10,14 +10,40 @@ import google.generativeai as genai
 
 logger = logging.getLogger(__name__)
 
-# Doit rester aligné sur app/routers/admin.py et collector/processors/gemini_processor.py.
+# Source unique côté backend (app/routers/admin.py importe d'ici).
+# Doit rester alignée sur collector/processors/gemini_processor.py.
 DEFAULT_MODEL_PRIORITY = [
-    "gemma-4-26b-a4b-it",      # 0,07 $ / 0,30 $
-    "gemma-4-31b-it",          # 0,09 $ / 0,34 $
-    "gemini-3.1-flash-lite",   # 0,25 $ / 1,50 $ — GA
-    "gemini-3-flash-preview",  # 0,25 $ / 1,50 $ — preview
-    "gemini-3.5-flash",        # 1,50 $ / 9,00 $
+    "gemini-3.1-flash-lite",   # 0,25 $ / 1,50 $ — GA, cheval de trait
+    "gemini-3-flash-preview",  # 0,25 $ / 1,50 $ — même prix, preview
+    "gemini-3.5-flash",        # 1,50 $ / 9,00 $ — qualité max
+    "gemma-4-31b-it",          # 0,09 $ / 0,34 $ — repli
+    "gemma-4-26b-a4b-it",      # 0,07 $ / 0,30 $ — dernier recours
 ]
+
+def resolve_model_priority(stored: list[str] | None) -> list[str]:
+    """Retourne l'ordre à appliquer — **littéralement celui choisi dans l'admin**.
+
+    Jumelle de la fonction du collector. Aucune réécriture : pas de tri, pas d'insertion de modèle, pas de purge.
+    L'ordre stocké en Firestore par la page admin fait autorité et est
+    sollicité tel quel à chaque appel LLM. `DEFAULT_MODEL_PRIORITY` ne sert
+    qu'à amorcer un projet neuf, quand aucun ordre n'a encore été choisi.
+
+    Un modèle inconnu du catalogue est signalé mais tout de même sollicité :
+    c'est un choix de l'administrateur, pas au code de le censurer.
+    """
+    if not stored:
+        logger.info("Aucun ordre de modèles en base — amorçage sur la liste par défaut.")
+        return list(DEFAULT_MODEL_PRIORITY)
+
+    inconnus = [m for m in stored if m not in DEFAULT_MODEL_PRIORITY]
+    if inconnus:
+        logger.warning(
+            f"Modèle(s) hors catalogue dans l'ordre choisi : {', '.join(inconnus)}. "
+            "Ils seront sollicités quand même — les retirer depuis la page admin "
+            "s'ils n'existent plus."
+        )
+    return list(stored)
+
 
 PROMPT_VERSION = "linkedin-v3"
 
@@ -201,13 +227,15 @@ async def generate_summary(text: str, models_to_try: list[str]) -> tuple[str, st
 
 
 def get_model_priority(db) -> list[str]:
-    """Lit model_priority depuis settings/global, retourne DEFAULT_MODEL_PRIORITY si absent."""
+    """Lit model_priority depuis settings/global — même ordre que la page admin.
+
+    Applique l'ordre choisi dans l'admin, exactement comme la collecte.
+    """
     try:
         doc = db.collection("settings").document("global").get()
         if doc.exists:
-            priority = doc.to_dict().get("model_priority") or []
-            if priority:
-                return priority
+            data = doc.to_dict()
+            return resolve_model_priority(data.get("model_priority"))
     except Exception as exc:
         logger.warning(f"Impossible de lire model_priority : {exc}")
     return DEFAULT_MODEL_PRIORITY

@@ -7,28 +7,28 @@ import google.generativeai as genai
 
 genai.configure(api_key=os.environ["GEMINI_API_KEY"])
 
-# Cascade triée par coût croissant (entrée / sortie en $ par million de tokens).
-# On sollicite le moins cher d'abord ; en cas de dépassement, on monte d'un cran.
-# À prix égal, le modèle stable passe devant le preview.
+# Cascade : le moins cher d'abord **parmi les modèles qui tiennent la qualité
+# attendue**, puis montée d'un cran à chaque refus. Les Gemma sont les moins
+# chers du catalogue mais produisent des descriptions trop courtes pour la
+# fiche article (4 à 6 phrases attendues) — ils restent en repli de dernier
+# recours, quand aucun modèle Gemini n'est disponible.
+# Coûts en $ par million de tokens (entrée / sortie).
 DEFAULT_MODEL_PRIORITY = [
-    "gemma-4-26b-a4b-it",      # 0,07 $ / 0,30 $
-    "gemma-4-31b-it",          # 0,09 $ / 0,34 $
-    "gemini-3.1-flash-lite",   # 0,25 $ / 1,50 $ — GA
-    "gemini-3-flash-preview",  # 0,25 $ / 1,50 $ — preview
-    "gemini-3.5-flash",        # 1,50 $ / 9,00 $
+    "gemini-3.1-flash-lite",   # 0,25 $ / 1,50 $ — GA, cheval de trait
+    "gemini-3-flash-preview",  # 0,25 $ / 1,50 $ — même prix, preview
+    "gemini-3.5-flash",        # 1,50 $ / 9,00 $ — qualité max
+    "gemma-4-31b-it",          # 0,09 $ / 0,34 $ — repli
+    "gemma-4-26b-a4b-it",      # 0,07 $ / 0,30 $ — dernier recours
 ]
-
-# À incrémenter à CHAQUE changement de l'ordre par défaut ci-dessus.
-# Sans ce marqueur, l'ordre stocké en Firestore l'emporte pour toujours et
-# modifier DEFAULT_MODEL_PRIORITY reste sans effet sur un projet existant
-# (c'est ce qui est arrivé à la mise à jour de juillet 2026).
-MODEL_PRIORITY_VERSION = 3
 
 CATEGORIES = ["IA", "DevOps", "Cloud", "Sécurité", "Dev", "IT", "Autre"]
 
 
 # Limites de contenu pour les prompts LLM
-MAX_ARTICLE_CONTENT_FOR_BATCH = 1500    # chars max par article dans le prompt batch
+# 1500 caractères ne suffisaient pas à nourrir une analyse de 4 à 6 phrases :
+# le modèle n'avait pas assez de matière et produisait des descriptions courtes.
+# À 4000, le surcoût est de l'ordre de 0,006 $ par run sur Flash Lite.
+MAX_ARTICLE_CONTENT_FOR_BATCH = 4000    # chars max par article dans le prompt batch
 MAX_GMAIL_CONTENT_FOR_PROMPT = 50_000  # chars max pour l'extraction Gmail
 MAX_SYNTHESIS_INPUT = 180_000           # chars max pour le prompt de synthèse
 MAX_REPORT_LOGS = 8_000                 # chars max des logs pour le rapport
@@ -43,22 +43,30 @@ MAX_ERROR_DETAIL = 300                  # chars max du message d'erreur conserv�
 logger = logging.getLogger(__name__)
 
 
-def merge_model_priority(stored: list[str], stored_version: int = 0) -> list[str]:
-    """Concilie l'ordre choisi dans l'admin et l'ordre par défaut du code.
+def resolve_model_priority(stored: list[str] | None) -> list[str]:
+    """Retourne l'ordre à appliquer — **littéralement celui choisi dans l'admin**.
 
-    - version stockée périmée → l'ordre par défaut s'applique (une seule fois),
-      sinon un changement de cascade côté code resterait sans effet en prod ;
-    - sinon on respecte l'ordre de l'admin, en purgeant les modèles inconnus
-      et en insérant les nouveaux en tête.
+    Aucune réécriture : pas de tri, pas d'insertion de modèle, pas de purge.
+    L'ordre stocké en Firestore par la page admin fait autorité et est
+    sollicité tel quel à chaque appel LLM. `DEFAULT_MODEL_PRIORITY` ne sert
+    qu'à amorcer un projet neuf, quand aucun ordre n'a encore été choisi.
+
+    Un modèle inconnu du catalogue est signalé mais tout de même sollicité :
+    c'est un choix de l'administrateur, pas au code de le censurer.
     """
-    if stored_version < MODEL_PRIORITY_VERSION:
+    if not stored:
+        logger.info("Aucun ordre de modèles en base — amorçage sur la liste par défaut.")
         return list(DEFAULT_MODEL_PRIORITY)
 
-    connus = [m for m in stored if m in DEFAULT_MODEL_PRIORITY]
-    for model in reversed(DEFAULT_MODEL_PRIORITY):
-        if model not in connus:
-            connus.insert(0, model)
-    return connus
+    inconnus = [m for m in stored if m not in DEFAULT_MODEL_PRIORITY]
+    if inconnus:
+        logger.warning(
+            f"Modèle(s) hors catalogue dans l'ordre choisi : {', '.join(inconnus)}. "
+            "Ils seront sollicités quand même — les retirer depuis la page admin "
+            "s'ils n'existent plus."
+        )
+    return list(stored)
+
 
 # Diagnostic des échecs LLM. Sans ça, tous les échecs remontaient comme
 # « quota épuisé » alors que la cause réelle est le plus souvent ailleurs
@@ -78,12 +86,25 @@ _HTTP_DIAGNOSTIC = {
 # prépayé épuisé, facturation suspendue). Ce n'est PAS un dépassement de
 # quota : les compteurs de la console restent au vert, et aucun modèle de la
 # cascade ne peut aboutir. Inutile d'essayer les suivants.
+#
+# ATTENTION : ne jamais chercher le mot « billing » seul. TOUS les 429 de
+# Gemini contiennent « check your plan and billing details », y compris un
+# simple dépassement de débit — ce marqueur trop large faisait passer une
+# limite de débit pour un compte suspendu et interrompait la cascade à tort.
 _BILLING_MARKERS = (
     "prepayment credits",
     "credits are depleted",
-    "billing",
-    "free tier is not available",
+    "billing account",
     "consumer_suspended",
+)
+
+# Signaux d'un dépassement ordinaire. Ils l'emportent sur les marqueurs
+# ci-dessus : un message qui nomme une métrique de quota décrit un débit
+# dépassé, pas une facturation suspendue — la cascade doit monter d'un cran.
+_RATE_LIMIT_MARKERS = (
+    "quota exceeded for metric",
+    "exceeded your current quota",
+    "rate limit",
 )
 
 BILLING_DIAGNOSTIC = (
@@ -94,10 +115,16 @@ BILLING_DIAGNOSTIC = (
 
 
 def _is_account_level_failure(exc: Exception, code: int | None) -> bool:
-    """Vrai si l'échec vient du compte (facturation) et non du modèle appelé."""
+    """Vrai si l'échec vient du compte (facturation) et non du modèle appelé.
+
+    En cas de doute, on répond False : mieux vaut monter d'un cran pour rien
+    que d'interrompre la cascade sur un simple dépassement de débit.
+    """
     if code != 429:
         return False
     message = str(exc).lower()
+    if any(marker in message for marker in _RATE_LIMIT_MARKERS):
+        return False
     return any(marker in message for marker in _BILLING_MARKERS)
 
 
@@ -228,10 +255,14 @@ Le contenu peut être en anglais ou en français — adapte-toi à la langue sou
 Pour chaque article, produis exactement ces champs :
 - "title_fr" (max 12 mots) : titre percutant en français
 - "title_en" (max 12 mots) : titre journalistique en anglais
-- "short_description_fr" (1 phrase ~25 mots) : accroche en français
-- "short_description_en" (1 phrase ~25 mots) : accroche en anglais
-- "long_description_fr" (4 à 6 phrases) : analyse enrichie en français
-- "long_description_en" (4 à 6 phrases) : analyse enrichie en anglais
+- "short_description_fr" (1 phrase de 25 mots minimum) : accroche en français
+- "short_description_en" (1 phrase de 25 mots minimum) : accroche en anglais
+- "long_description_fr" (4 à 6 phrases, 500 caractères minimum) : analyse enrichie en français
+- "long_description_en" (4 à 6 phrases, 500 caractères minimum) : analyse enrichie en anglais
+
+Les longueurs minimales sont impératives : une description trop courte est
+inexploitable. Développe le contexte et les enjeux pour les atteindre, sans
+jamais inventer de fait absent du contenu fourni.
 - "category" : une valeur parmi {categories}
 - "keywords_fr" : liste de 10 à 15 mots simples en français (technologies, entreprises, concepts, acteurs clés). Ex: ["intelligence artificielle", "sécurité", "OpenAI"]
 - "keywords_en" : liste de 10 à 15 mots simples en anglais (mêmes concepts). Ex: ["artificial intelligence", "security", "OpenAI"]

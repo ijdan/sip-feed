@@ -344,3 +344,272 @@ def test_generate_run_report_rapporte_la_cause_reelle(monkeypatch):
     assert "hors quota" not in rapport
     assert "modele-x" in rapport
     assert "404" in rapport
+
+
+# ─── Blocage au niveau du compte (facturation) ────────────────────────────────
+# Google renvoie 429 aussi bien pour un débit dépassé que pour un solde prépayé
+# épuisé. Les deux ne se traitent pas pareil : le second bloque tous les modèles.
+
+_ERREUR_FACTURATION = (
+    "429 Your prepayment credits are depleted. Please go to AI Studio at "
+    "https://ai.studio/projects to manage your project and billing."
+)
+
+
+def test_429_de_facturation_nest_pas_presente_comme_un_quota(monkeypatch):
+    """Solde prépayé épuisé : le message doit désigner la facturation, pas le quota."""
+    from processors import gemini_processor
+    from google.api_core import exceptions as gexc
+
+    monkeypatch.setattr(gemini_processor.genai, "GenerativeModel",
+                        _fail_with(gexc.ResourceExhausted(_ERREUR_FACTURATION)))
+
+    with pytest.raises(gemini_processor.LLMCascadeError) as excinfo:
+        gemini_processor._call_llm("prompt", ["modele-a"])
+
+    message = str(excinfo.value)
+    assert "FACTURATION BLOQUÉE" in message
+    assert "DÉBIT OU QUOTA DÉPASSÉ" not in message, "à ne pas confondre avec un débit dépassé"
+    assert "ai.studio/projects" in message, "l'action corrective doit rester lisible"
+
+
+def test_429_de_debit_reste_un_quota(monkeypatch):
+    """Un vrai dépassement de débit garde son libellé et n'interrompt pas la cascade."""
+    from processors import gemini_processor
+    from google.api_core import exceptions as gexc
+
+    monkeypatch.setattr(gemini_processor.genai, "GenerativeModel",
+                        _fail_with(gexc.ResourceExhausted("429 Quota exceeded for quota metric 'requests'")))
+
+    with pytest.raises(gemini_processor.LLMCascadeError) as excinfo:
+        gemini_processor._call_llm("prompt", ["modele-a", "modele-b"])
+
+    assert "DÉBIT OU QUOTA DÉPASSÉ" in str(excinfo.value)
+    assert excinfo.value.aborted is False
+    assert len(excinfo.value.failures) == 2, "tous les modèles doivent être essayés"
+
+
+def test_facturation_bloquee_interrompt_la_cascade(monkeypatch):
+    """Inutile de marteler les modèles suivants : le blocage est au niveau du compte."""
+    from processors import gemini_processor
+    from google.api_core import exceptions as gexc
+
+    monkeypatch.setattr(gemini_processor.genai, "GenerativeModel",
+                        _fail_with(gexc.ResourceExhausted(_ERREUR_FACTURATION)))
+
+    with pytest.raises(gemini_processor.LLMCascadeError) as excinfo:
+        gemini_processor._call_llm("prompt", ["modele-a", "modele-b", "modele-c"])
+
+    assert excinfo.value.aborted is True
+    assert [m for m, _ in excinfo.value.failures] == ["modele-a"], "un seul modèle essayé"
+
+
+def test_generate_run_report_interrompt_aussi_la_cascade(monkeypatch):
+    """Le rapport ne doit pas non plus rejouer 5 fois le même échec de facturation."""
+    from unittest.mock import MagicMock
+    from processors import gemini_processor
+    from google.api_core import exceptions as gexc
+
+    appels = []
+
+    def fake_model(model_name, *a, **k):
+        appels.append(model_name)
+        model = MagicMock()
+        model.generate_content = MagicMock(side_effect=gexc.ResourceExhausted(_ERREUR_FACTURATION))
+        return model
+
+    monkeypatch.setattr(gemini_processor.genai, "GenerativeModel", fake_model)
+
+    rapport = gemini_processor.generate_run_report("des logs", ["modele-a", "modele-b", "modele-c"])
+
+    assert appels == ["modele-a"], "cascade non interrompue"
+    assert "FACTURATION BLOQUÉE" in rapport
+
+
+def test_select_relevant_articles_interrompt_aussi_la_cascade(monkeypatch):
+    """Même court-circuit sur l'étape de sélection de la synthèse."""
+    from unittest.mock import MagicMock
+    from processors import gemini_processor
+    from google.api_core import exceptions as gexc
+
+    appels = []
+
+    def fake_model(model_name, *a, **k):
+        appels.append(model_name)
+        model = MagicMock()
+        model.generate_content = MagicMock(side_effect=gexc.ResourceExhausted(_ERREUR_FACTURATION))
+        return model
+
+    monkeypatch.setattr(gemini_processor.genai, "GenerativeModel", fake_model)
+
+    resultat = gemini_processor.select_relevant_articles(
+        [{"id": "a1", "title": "Test", "long_description": "Test."}],
+        "kubernetes",
+        ["modele-a", "modele-b", "modele-c"],
+    )
+
+    assert resultat is None
+    assert appels == ["modele-a"], "cascade non interrompue"
+
+
+# ─── Ordre de la cascade de modèles ───────────────────────────────────────────
+# Régression : l'ordre stocké en Firestore l'emportait sans condition, si bien
+# qu'une modification de DEFAULT_MODEL_PRIORITY restait sans effet en prod.
+
+# Coût entrée/sortie en $ par million de tokens, au 3 août 2026.
+PRIX_PAR_MTOK = {
+    "gemma-4-26b-a4b-it": (0.070, 0.300),
+    "gemma-4-31b-it": (0.090, 0.340),
+    "gemini-3.1-flash-lite": (0.250, 1.500),
+    "gemini-3-flash-preview": (0.250, 1.500),
+    "gemini-3.5-flash": (1.500, 9.000),
+}
+
+
+def test_la_cascade_est_triee_du_moins_cher_au_plus_cher():
+    """Règle de conception : on sollicite toujours le moins cher d'abord."""
+    from processors.gemini_processor import DEFAULT_MODEL_PRIORITY
+
+    couts = [PRIX_PAR_MTOK[m] for m in DEFAULT_MODEL_PRIORITY]
+    assert couts == sorted(couts), f"cascade non triée par coût : {DEFAULT_MODEL_PRIORITY}"
+    assert DEFAULT_MODEL_PRIORITY[-1] == "gemini-3.5-flash", "le plus cher doit être en dernier"
+
+
+def test_a_prix_egal_le_modele_stable_precede_le_preview():
+    from processors.gemini_processor import DEFAULT_MODEL_PRIORITY
+
+    assert DEFAULT_MODEL_PRIORITY.index("gemini-3.1-flash-lite") < \
+        DEFAULT_MODEL_PRIORITY.index("gemini-3-flash-preview")
+
+
+def test_backend_et_collector_partagent_le_meme_ordre():
+    """Les copies dupliquées de la liste ne doivent pas diverger."""
+    import re
+    from pathlib import Path
+    from processors.gemini_processor import DEFAULT_MODEL_PRIORITY
+
+    racine = Path(__file__).resolve().parents[1]
+    for fichier in ("backend/app/routers/admin.py",
+                    "backend/app/services/article_summarizer.py"):
+        source = (racine / fichier).read_text()
+        bloc = re.search(r"DEFAULT_MODEL_PRIORITY = \[(.*?)\]", source, re.S).group(1)
+        modeles = re.findall(r'"([^"]+)"', bloc)
+        assert modeles == DEFAULT_MODEL_PRIORITY, f"{fichier} a divergé du collector"
+
+
+def test_version_perimee_reapplique_lordre_par_defaut():
+    """Le cœur du correctif : un projet existant doit recevoir le nouvel ordre."""
+    from processors.gemini_processor import merge_model_priority, DEFAULT_MODEL_PRIORITY
+
+    ordre_stocke_en_juillet = [
+        "gemini-3.5-flash", "gemini-3-flash-preview", "gemini-3.1-flash-lite",
+        "gemma-4-31b-it", "gemma-4-26b-a4b-it",
+    ]
+
+    assert merge_model_priority(ordre_stocke_en_juillet, 0) == DEFAULT_MODEL_PRIORITY
+    assert merge_model_priority(ordre_stocke_en_juillet, 2) == DEFAULT_MODEL_PRIORITY
+
+
+def test_version_a_jour_respecte_lordre_choisi_dans_ladmin():
+    """Une fois la migration passée, le choix de l'utilisateur redevient roi."""
+    from processors.gemini_processor import merge_model_priority, MODEL_PRIORITY_VERSION
+
+    choix_admin = [
+        "gemini-3.5-flash", "gemma-4-31b-it", "gemini-3.1-flash-lite",
+        "gemini-3-flash-preview", "gemma-4-26b-a4b-it",
+    ]
+    assert merge_model_priority(choix_admin, MODEL_PRIORITY_VERSION) == choix_admin
+
+
+def test_purge_les_modeles_inconnus_et_insere_les_nouveaux():
+    """Comportement historique conservé pour une version à jour."""
+    from processors.gemini_processor import merge_model_priority, MODEL_PRIORITY_VERSION
+
+    resultat = merge_model_priority(
+        ["modele-retire-du-catalogue", "gemini-3.5-flash"], MODEL_PRIORITY_VERSION
+    )
+    assert "modele-retire-du-catalogue" not in resultat
+    assert set(resultat) == {
+        "gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-3-flash-preview",
+        "gemma-4-31b-it", "gemma-4-26b-a4b-it",
+    }
+    assert resultat[-1] == "gemini-3.5-flash", "les modèles absents s'insèrent en tête"
+
+
+# ─── Motif de la montée en gamme ──────────────────────────────────────────────
+# La cascade est triée du moins cher au plus cher : on ne monte d'un cran que
+# lorsque le modèle courant refuse. Un JSON illisible doit compter comme un
+# refus — sinon un petit modèle bavard fait tomber tout le run.
+
+def test_json_malforme_fait_monter_dun_cran(monkeypatch):
+    """Le modèle bon marché répond du texte libre : on doit passer au suivant."""
+    from unittest.mock import MagicMock
+    from processors import gemini_processor
+
+    appels = []
+
+    def fake_model(model_name, *a, **k):
+        appels.append(model_name)
+        model = MagicMock()
+        response = MagicMock()
+        response.text = ("Bien sûr ! Voici les articles :" if model_name == "pas-cher"
+                         else '{"ok": true}')
+        model.generate_content = MagicMock(return_value=response)
+        return model
+
+    monkeypatch.setattr(gemini_processor.genai, "GenerativeModel", fake_model)
+
+    resultat = gemini_processor._call_llm("prompt", ["pas-cher", "plus-cher"])
+
+    assert resultat == '{"ok": true}'
+    assert appels == ["pas-cher", "plus-cher"], "la cascade n'est pas montée d'un cran"
+
+
+def test_json_malforme_partout_leve_une_erreur_de_cascade(monkeypatch):
+    """Si aucun modèle ne produit du JSON, l'échec doit être explicite."""
+    from unittest.mock import MagicMock
+    from processors import gemini_processor
+
+    model = MagicMock()
+    response = MagicMock()
+    response.text = "désolé, je ne peux pas"
+    model.generate_content = MagicMock(return_value=response)
+    monkeypatch.setattr(gemini_processor.genai, "GenerativeModel", lambda *a, **k: model)
+
+    with pytest.raises(gemini_processor.LLMCascadeError) as excinfo:
+        gemini_processor._call_llm("prompt", ["a", "b"])
+
+    assert "JSON" in str(excinfo.value)
+    assert len(excinfo.value.failures) == 2
+
+
+def test_depassement_et_anomalie_sont_journalises_differemment(monkeypatch, caplog):
+    """Le rapport doit distinguer une montée par conception d'un défaut à corriger."""
+    import logging
+    from unittest.mock import MagicMock
+    from processors import gemini_processor
+    from google.api_core import exceptions as gexc
+
+    erreurs = {
+        "sur-quota": gexc.ResourceExhausted("429 Quota exceeded for quota metric 'requests'"),
+        "inconnu": gexc.NotFound("404 model not found"),
+    }
+
+    def fake_model(model_name, *a, **k):
+        model = MagicMock()
+        if model_name in erreurs:
+            model.generate_content = MagicMock(side_effect=erreurs[model_name])
+        else:
+            response = MagicMock()
+            response.text = '{"ok": true}'
+            model.generate_content = MagicMock(return_value=response)
+        return model
+
+    monkeypatch.setattr(gemini_processor.genai, "GenerativeModel", fake_model)
+
+    with caplog.at_level(logging.WARNING):
+        gemini_processor._call_llm("prompt", ["sur-quota", "inconnu", "bon"])
+
+    journal = caplog.text
+    assert "dépassement sur sur-quota" in journal
+    assert "anomalie sur inconnu" in journal

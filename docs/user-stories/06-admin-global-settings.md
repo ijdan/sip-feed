@@ -64,12 +64,17 @@ Switch indépendant. Configure `thinking_config = {"thinking_budget": -1}` (auto
 Liste ordonnée des modèles connus avec boutons ▲▼ pour réordonner. Chaque modèle a une étiquette explicative (ex. "Gemini 3 Flash — Dernière génération", "Gemini 2.0 Flash Lite — Dernier recours"). La liste persiste dans `model_priority[]`.
 
 **Règles métier**
-- Liste canonique côté backend (`DEFAULT_MODEL_PRIORITY`, dupliquée 3x — cf. CLAUDE.md).
+- Liste canonique `DEFAULT_MODEL_PRIORITY`, dupliquée 3x — cf. CLAUDE.md. Elle est **triée par coût croissant** ($ par million de tokens, entrée puis sortie) : on sollicite toujours le moins cher d'abord et on ne monte en gamme — donc en prix — que si le modèle courant refuse. À prix égal, le modèle GA passe devant le preview.
 - Au GET, les modèles inconnus stockés sont nettoyés, les nouveaux sont insérés **en tête** automatiquement.
-- Le collector essaie les modèles dans l'ordre ; passe au suivant en cas d'échec (quota, indisponibilité).
+- L'ordre stocké fait autorité sur la constante. Changer l'ordre par défaut n'a d'effet sur un projet existant que si `MODEL_PRIORITY_VERSION` est incrémentée : la nouvelle liste s'applique alors **une seule fois**, puis le choix de l'admin redevient prioritaire.
+- Motifs de montée d'un cran, journalisés distinctement dans le rapport d'exécution :
+  - **dépassement** (429 de quota ou de débit) → cas nominal, c'est la raison d'être de la cascade ;
+  - **anomalie** (404 modèle inconnu, 400 requête invalide, réponse vide ou non conforme au JSON demandé) → on monte aussi, mais c'est un défaut à corriger ;
+  - **blocage du compte** (429 de facturation) → arrêt immédiat, aucun modèle ne peut aboutir.
+- La validité du JSON est vérifiée **dans** la cascade (`_call_llm`) : une réponse malformée fait monter d'un cran au lieu de faire basculer tout le run vers `save_raw_articles`.
 
 **Critères d'acceptation**
-1. La liste affiche les 8 modèles dans l'ordre actuel.
+1. La liste affiche les 5 modèles dans l'ordre actuel.
 2. Cliquer ▲ ou ▼ déplace le modèle d'une position.
 3. La sauvegarde est immédiate (PUT /admin/settings).
 4. Le collector utilise réellement l'ordre au prochain run (vérifiable dans les logs).

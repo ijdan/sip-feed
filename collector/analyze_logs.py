@@ -9,7 +9,7 @@ import os
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
 from google.cloud import firestore
-from processors.gemini_processor import DEFAULT_MODEL_PRIORITY
+from processors.gemini_processor import DEFAULT_MODEL_PRIORITY, merge_model_priority
 from processors.log_analyzer import run_log_analysis
 
 
@@ -20,9 +20,10 @@ def main():
     settings_doc = db.collection("settings").document("global").get()
     model_priority = DEFAULT_MODEL_PRIORITY
     if settings_doc.exists:
-        stored = settings_doc.to_dict().get("model_priority", [])
-        if stored:
-            model_priority = stored
+        data = settings_doc.to_dict()
+        model_priority = merge_model_priority(
+            data.get("model_priority", []), data.get("model_priority_version", 0)
+        )
 
     result = run_log_analysis(db, model_priority=model_priority)
     logging.info(

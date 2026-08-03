@@ -10,12 +10,13 @@ import google.generativeai as genai
 
 logger = logging.getLogger(__name__)
 
+# Doit rester aligné sur app/routers/admin.py et collector/processors/gemini_processor.py.
 DEFAULT_MODEL_PRIORITY = [
-    "gemini-3.5-flash",
-    "gemini-3.1-flash-lite",
-    "gemini-3-flash-preview",
-    "gemma-4-31b-it",
-    "gemma-4-26b-a4b-it",
+    "gemma-4-26b-a4b-it",      # 0,07 $ / 0,30 $
+    "gemma-4-31b-it",          # 0,09 $ / 0,34 $
+    "gemini-3.1-flash-lite",   # 0,25 $ / 1,50 $ — GA
+    "gemini-3-flash-preview",  # 0,25 $ / 1,50 $ — preview
+    "gemini-3.5-flash",        # 1,50 $ / 9,00 $
 ]
 
 PROMPT_VERSION = "linkedin-v3"

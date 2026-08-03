@@ -64,9 +64,9 @@ Switch indépendant. Configure `thinking_config = {"thinking_budget": -1}` (auto
 Liste ordonnée des modèles connus avec boutons ▲▼ pour réordonner. Chaque modèle a une étiquette explicative (ex. "Gemini 3 Flash — Dernière génération", "Gemini 2.0 Flash Lite — Dernier recours"). La liste persiste dans `model_priority[]`.
 
 **Règles métier**
-- Liste canonique `DEFAULT_MODEL_PRIORITY`, dupliquée 3x — cf. CLAUDE.md. Elle est **triée par coût croissant parmi les modèles qui tiennent la qualité attendue** : on sollicite le moins cher d'abord et on ne monte en gamme — donc en prix — que si le modèle courant refuse. À prix égal, le modèle GA passe devant le preview. Les Gemma sont les moins chers du catalogue mais rendent des descriptions trop courtes pour la fiche article (4 à 6 phrases attendues) : ils restent en **repli de dernier recours**.
-- Le GET est en **lecture seule** : il restitue l'ordre stocké sans le réécrire. Seul le PUT (boutons ▲▼) modifie `model_priority`. Un modèle hors catalogue est signalé dans les logs mais reste sollicité.
 - **L'ordre choisi ici est appliqué littéralement à chaque appel LLM.** Aucune déduction du code : ni tri, ni purge, ni insertion. Modifier `DEFAULT_MODEL_PRIORITY` n'a aucun effet sur un projet existant — cette constante n'amorce qu'un projet neuf, quand aucun ordre n'a encore été choisi.
+- La liste d'amorçage `DEFAULT_MODEL_PRIORITY` (2 exemplaires — cf. CLAUDE.md) est ordonnée du moins cher au plus cher parmi les modèles qui tiennent la qualité attendue. Les Gemma sont les moins chers du catalogue mais rendent des descriptions trop courtes pour la fiche article (4 à 6 phrases attendues) : ils y figurent en **repli de dernier recours**. Ce n'est qu'un point de départ — l'admin reste libre de tout réordonner.
+- Le GET est en **lecture seule** : il restitue l'ordre stocké sans le réécrire. Seul le PUT (boutons ▲▼) modifie `model_priority`. Un modèle hors catalogue est signalé dans les logs mais reste sollicité.
 - Motifs de montée d'un cran, journalisés distinctement dans le rapport d'exécution :
   - **dépassement** (429 de quota ou de débit) → cas nominal, c'est la raison d'être de la cascade ;
   - **anomalie** (404 modèle inconnu, 400 requête invalide, réponse vide ou non conforme au JSON demandé) → on monte aussi, mais c'est un défaut à corriger ;
@@ -78,10 +78,12 @@ Liste ordonnée des modèles connus avec boutons ▲▼ pour réordonner. Chaque
 2. Cliquer ▲ ou ▼ déplace le modèle d'une position.
 3. La sauvegarde est immédiate (PUT /admin/settings).
 4. Le collector utilise réellement l'ordre au prochain run (vérifiable dans les logs).
-5. Si un nouveau modèle est ajouté côté code (DEFAULT_MODEL_PRIORITY), il apparaît automatiquement en tête au prochain GET admin/settings.
+5. L'ordre affiché est exactement celui stocké : ouvrir la page ne le réécrit jamais.
 
 **Cas limites**
-- L'admin supprime tous les modèles (impossible via UI mais possible en raw API) → fallback sur DEFAULT_MODEL_PRIORITY.
+- L'admin vide la liste (impossible via l'UI, possible en raw API) → amorçage sur `DEFAULT_MODEL_PRIORITY`.
+- Un modèle est retiré du catalogue Google mais reste dans l'ordre choisi → il est sollicité quand même, échoue en 404, et la cascade monte d'un cran. Un avertissement le signale dans les logs ; à l'admin de le retirer.
+- Un nouveau modèle est ajouté côté code → il n'apparaît **pas** automatiquement. C'est le prix de la règle « aucune déduction ».
 
 ---
 

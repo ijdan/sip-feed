@@ -502,12 +502,17 @@ def test_backend_et_collector_partagent_le_meme_ordre():
     from processors.gemini_processor import DEFAULT_MODEL_PRIORITY
 
     racine = Path(__file__).resolve().parents[1]
-    for fichier in ("backend/app/routers/admin.py",
-                    "backend/app/services/article_summarizer.py"):
-        source = (racine / fichier).read_text()
-        bloc = re.search(r"DEFAULT_MODEL_PRIORITY = \[(.*?)\]", source, re.S).group(1)
-        modeles = re.findall(r'"([^"]+)"', bloc)
-        assert modeles == DEFAULT_MODEL_PRIORITY, f"{fichier} a divergé du collector"
+    # Une seule copie côté backend depuis que admin.py importe le service.
+    source = (racine / "backend/app/services/article_summarizer.py").read_text()
+    bloc = re.search(r"DEFAULT_MODEL_PRIORITY = \[(.*?)\]", source, re.S).group(1)
+    assert re.findall(r'"([^"]+)"', bloc) == DEFAULT_MODEL_PRIORITY, "le backend a divergé du collector"
+
+    version = re.search(r"MODEL_PRIORITY_VERSION = (\d+)", source).group(1)
+    from processors.gemini_processor import MODEL_PRIORITY_VERSION
+    assert int(version) == MODEL_PRIORITY_VERSION, "les versions backend/collector divergent"
+
+    assert "DEFAULT_MODEL_PRIORITY = [" not in (racine / "backend/app/routers/admin.py").read_text(), \
+        "admin.py doit importer la liste, pas la redéfinir"
 
 
 def test_version_perimee_reapplique_lordre_par_defaut():

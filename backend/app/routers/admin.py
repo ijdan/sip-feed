@@ -44,20 +44,13 @@ CLOUD_RUN_JOB_URL = (
 )
 
 
-# Le modèle le moins cher passe en premier (cf. collector/processors/gemini_processor.py,
-# où cette liste et sa version sont dupliquées — modifier les deux ensemble).
-DEFAULT_MODEL_PRIORITY = [
-    "gemini-3.1-flash-lite",   # 0,25 $ / 1,50 $ — GA, cheval de trait
-    "gemini-3-flash-preview",  # 0,25 $ / 1,50 $ — même prix, preview
-    "gemini-3.5-flash",        # 1,50 $ / 9,00 $ — qualité max
-    "gemma-4-31b-it",          # 0,09 $ / 0,34 $ — repli
-    "gemma-4-26b-a4b-it",      # 0,07 $ / 0,30 $ — dernier recours
-]
-
-# À incrémenter à CHAQUE changement de l'ordre par défaut : sans ce marqueur,
-# l'ordre stocké en Firestore l'emporte pour toujours et la constante ci-dessus
-# reste sans effet sur un projet existant.
-MODEL_PRIORITY_VERSION = 4
+# Source unique côté backend — voir app/services/article_summarizer.py.
+# La liste jumelle du collector est dans collector/processors/gemini_processor.py.
+from app.services.article_summarizer import (
+    DEFAULT_MODEL_PRIORITY,
+    MODEL_PRIORITY_VERSION,
+    merge_model_priority,
+)
 
 class GlobalSettings(BaseModel):
     llm_enabled: bool = True
@@ -92,18 +85,12 @@ def get_settings(_: dict = Depends(require_admin)):
     if not doc.exists:
         return GlobalSettings()
     data = doc.to_dict()
-    stored_version = data.get("model_priority_version", 0)
-
-    if stored_version < MODEL_PRIORITY_VERSION:
-        # L'ordre par défaut du code vient de changer : il s'applique une fois,
-        # puis l'ordre choisi dans l'admin redevient prioritaire.
-        stored = list(DEFAULT_MODEL_PRIORITY)
-    else:
-        stored = [m for m in data.get("model_priority", []) if m in DEFAULT_MODEL_PRIORITY]
-        for model in reversed(DEFAULT_MODEL_PRIORITY):
-            if model not in stored:
-                stored.insert(0, model)
-
+    # Même règle que le collector et que le résumé à la demande : si la version
+    # stockée est périmée, l'ordre par défaut s'applique une fois, puis le choix
+    # fait ici redevient prioritaire.
+    stored = merge_model_priority(
+        data.get("model_priority", []), data.get("model_priority_version", 0)
+    )
     data["model_priority"] = stored
     data["model_priority_version"] = MODEL_PRIORITY_VERSION
     # Persiste la liste nettoyée et la version appliquée

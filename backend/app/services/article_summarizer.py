@@ -10,7 +10,8 @@ import google.generativeai as genai
 
 logger = logging.getLogger(__name__)
 
-# Doit rester aligné sur app/routers/admin.py et collector/processors/gemini_processor.py.
+# Source unique côté backend (app/routers/admin.py importe d'ici).
+# Doit rester alignée sur collector/processors/gemini_processor.py.
 DEFAULT_MODEL_PRIORITY = [
     "gemini-3.1-flash-lite",   # 0,25 $ / 1,50 $ — GA, cheval de trait
     "gemini-3-flash-preview",  # 0,25 $ / 1,50 $ — même prix, preview
@@ -18,6 +19,29 @@ DEFAULT_MODEL_PRIORITY = [
     "gemma-4-31b-it",          # 0,09 $ / 0,34 $ — repli
     "gemma-4-26b-a4b-it",      # 0,07 $ / 0,30 $ — dernier recours
 ]
+
+# À incrémenter à CHAQUE changement de l'ordre par défaut ci-dessus, en même
+# temps que la constante jumelle du collector.
+MODEL_PRIORITY_VERSION = 4
+
+
+def merge_model_priority(stored: list[str], stored_version: int = 0) -> list[str]:
+    """Concilie l'ordre choisi dans l'admin et l'ordre par défaut du code.
+
+    Jumelle de `collector/processors/gemini_processor.merge_model_priority`.
+    Tous les lecteurs de `model_priority` doivent passer par ici, sinon ils
+    divergent de ce qu'affiche la page admin tant que celle-ci n'a pas été
+    ouverte (c'est elle qui persiste la migration).
+    """
+    if stored_version < MODEL_PRIORITY_VERSION:
+        return list(DEFAULT_MODEL_PRIORITY)
+
+    connus = [m for m in stored if m in DEFAULT_MODEL_PRIORITY]
+    for model in reversed(DEFAULT_MODEL_PRIORITY):
+        if model not in connus:
+            connus.insert(0, model)
+    return connus
+
 
 PROMPT_VERSION = "linkedin-v3"
 
@@ -201,13 +225,21 @@ async def generate_summary(text: str, models_to_try: list[str]) -> tuple[str, st
 
 
 def get_model_priority(db) -> list[str]:
-    """Lit model_priority depuis settings/global, retourne DEFAULT_MODEL_PRIORITY si absent."""
+    """Lit model_priority depuis settings/global — même ordre que la page admin.
+
+    Passe par merge_model_priority : sans ça, le bouton « Régénérer le résumé
+    IA » utilisait l'ordre brut stocké en Firestore et pouvait solliciter un
+    autre modèle que le collector tant que la page admin n'avait pas été
+    ouverte pour persister la migration.
+    """
     try:
         doc = db.collection("settings").document("global").get()
         if doc.exists:
-            priority = doc.to_dict().get("model_priority") or []
-            if priority:
-                return priority
+            data = doc.to_dict()
+            return merge_model_priority(
+                data.get("model_priority") or [],
+                data.get("model_priority_version", 0),
+            )
     except Exception as exc:
         logger.warning(f"Impossible de lire model_priority : {exc}")
     return DEFAULT_MODEL_PRIORITY

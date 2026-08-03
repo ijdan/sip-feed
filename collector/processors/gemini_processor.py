@@ -41,10 +41,45 @@ _HTTP_DIAGNOSTIC = {
     401: "clé API absente ou invalide",
     403: "accès refusé — API non activée sur le projet, ou clé restreinte",
     404: "modèle introuvable sur la version d'API appelée",
-    429: "QUOTA OU DÉBIT DÉPASSÉ (429)",
+    429: "DÉBIT OU QUOTA DÉPASSÉ (429) — réessayer plus tard",
     500: "erreur interne Google",
     503: "modèle temporairement surchargé",
 }
+
+# Google renvoie aussi un 429 quand le compte lui-même est bloqué (solde
+# prépayé épuisé, facturation suspendue). Ce n'est PAS un dépassement de
+# quota : les compteurs de la console restent au vert, et aucun modèle de la
+# cascade ne peut aboutir. Inutile d'essayer les suivants.
+_BILLING_MARKERS = (
+    "prepayment credits",
+    "credits are depleted",
+    "billing",
+    "free tier is not available",
+    "consumer_suspended",
+)
+
+BILLING_DIAGNOSTIC = (
+    "FACTURATION BLOQUÉE (429) — ce n'est pas un dépassement de quota : "
+    "le solde prépayé du projet est épuisé ou la facturation est suspendue. "
+    "Recharger le projet sur https://ai.studio/projects"
+)
+
+
+def _is_account_level_failure(exc: Exception, code: int | None) -> bool:
+    """Vrai si l'échec vient du compte (facturation) et non du modèle appelé."""
+    if code != 429:
+        return False
+    message = str(exc).lower()
+    return any(marker in message for marker in _BILLING_MARKERS)
+
+
+def _http_code(exc: Exception) -> int | None:
+    """Code HTTP porté par une exception google-api-core, s'il y en a un."""
+    code = getattr(exc, "code", None)
+    if isinstance(code, int):
+        return code
+    code = getattr(getattr(exc, "response", None), "status_code", None)
+    return code if isinstance(code, int) else None
 
 
 def _describe_llm_error(exc: Exception) -> str:
@@ -54,26 +89,53 @@ def _describe_llm_error(exc: Exception) -> str:
     entre un vrai dépassement de quota et une erreur de configuration.
     """
     message = str(exc).strip().replace("\n", " ")[:MAX_ERROR_DETAIL]
-    code = getattr(exc, "code", None)
-    if not isinstance(code, int):
-        response = getattr(exc, "response", None)
-        code = getattr(response, "status_code", None)
+    code = _http_code(exc)
 
-    diagnostic = _HTTP_DIAGNOSTIC.get(code) if isinstance(code, int) else None
+    if _is_account_level_failure(exc, code):
+        diagnostic = BILLING_DIAGNOSTIC
+    else:
+        diagnostic = _HTTP_DIAGNOSTIC.get(code) if code is not None else None
+
     prefix = f"HTTP {code} — {diagnostic}" if diagnostic else exc.__class__.__name__
     return f"{prefix} : {message}"
+
+
+def _entete_echec(errors: list[str], interrompu: bool) -> str:
+    """En-tête honnête d'un message de repli : ne pas dire « tous les modèles »
+    quand la cascade a été coupée au premier."""
+    if interrompu:
+        return "le compte est bloqué, cascade interrompue au premier modèle"
+    return f"les {len(errors)} modèle(s) de la cascade ont échoué"
+
+
+def _stop_cascade(exc: Exception, etape: str, restants: list[str]) -> bool:
+    """Vrai si l'échec est au niveau du compte : les modèles suivants échoueront pareil."""
+    if not _is_account_level_failure(exc, _http_code(exc)):
+        return False
+    if restants:
+        logger.error(
+            f"{etape} : échec au niveau du compte — cascade interrompue, "
+            f"{len(restants)} modèle(s) non essayé(s) ({', '.join(restants)}). "
+            "Aucun modèle ne peut aboutir tant que la facturation est bloquée."
+        )
+    return True
 
 
 class LLMCascadeError(RuntimeError):
     """Tous les modèles de la cascade ont échoué — porte le détail par modèle."""
 
-    def __init__(self, failures: list[tuple[str, str]]):
+    def __init__(self, failures: list[tuple[str, str]], aborted: bool = False):
         self.failures = failures
+        self.aborted = aborted
+        if not failures:
+            super().__init__("aucun modèle LLM configuré dans model_priority")
+            return
         detail = " | ".join(f"{model} → {reason}" for model, reason in failures)
-        super().__init__(
-            f"les {len(failures)} modèle(s) de la cascade ont échoué : {detail}"
-            if failures else "aucun modèle LLM configuré dans model_priority"
+        entete = (
+            "cascade interrompue — le blocage vient du compte, pas du modèle"
+            if aborted else f"les {len(failures)} modèle(s) de la cascade ont échoué"
         )
+        super().__init__(f"{entete} : {detail}")
 
 
 def _extract_response_text(response, model_name: str) -> str:
@@ -312,6 +374,9 @@ def _call_llm(prompt: str, models_to_try: list[str], thinking: bool = True) -> s
             logger.warning(f"Modèle {model_name} en échec — {reason}")
             failures.append((model_name, reason))
 
+            if _stop_cascade(exc, "Cascade LLM", models_to_try[len(failures):]):
+                raise LLMCascadeError(failures, aborted=True) from exc
+
     raise LLMCascadeError(failures)
 
 
@@ -451,7 +516,7 @@ def select_relevant_articles(articles: list[dict], interest: str, model_priority
     )
 
     models_to_try = model_priority or DEFAULT_MODEL_PRIORITY
-    for model_name in models_to_try:
+    for rang, model_name in enumerate(models_to_try):
         try:
             m = genai.GenerativeModel(model_name, generation_config=config)
             response = m.generate_content(prompt)
@@ -463,6 +528,8 @@ def select_relevant_articles(articles: list[dict], interest: str, model_priority
             return {"selected_ids": ids, "usage": usage}
         except Exception as e:
             logger.warning(f"Sélection : {model_name} en échec — {_describe_llm_error(e)}")
+            if _stop_cascade(e, "Sélection", models_to_try[rang + 1:]):
+                break
 
     return None
 
@@ -491,6 +558,7 @@ def generate_synthesis(articles: list[dict], interest: str, model_priority: list
 
     models_to_try = model_priority or DEFAULT_MODEL_PRIORITY
     errors = []
+    interrompu = False
     for model_name in models_to_try:
         try:
             m = genai.GenerativeModel(model_name, generation_config=config)
@@ -508,10 +576,13 @@ def generate_synthesis(articles: list[dict], interest: str, model_priority: list
             reason = _describe_llm_error(e)
             logger.warning(f"Synthèse : {model_name} en échec — {reason}")
             errors.append(f"- **{model_name}** : {reason}")
+            if _stop_cascade(e, "Synthèse", models_to_try[len(errors):]):
+                interrompu = True
+                break
 
     details = "\n".join(errors)
     return {
-        "synthesis": f"⚠️ Synthèse indisponible — tous les modèles LLM ont échoué :\n{details}",
+        "synthesis": f"⚠️ Synthèse indisponible — {_entete_echec(errors, interrompu)} :\n{details}",
         "cited_ids": [],
         "usage": _no_usage,
     }
@@ -566,6 +637,7 @@ def generate_run_report(logs: str, model_priority: list[str] | None = None) -> s
     models_to_try = model_priority or DEFAULT_MODEL_PRIORITY
 
     errors = []
+    interrompu = False
     for model_name in models_to_try:
         try:
             m = genai.GenerativeModel(model_name)
@@ -576,9 +648,12 @@ def generate_run_report(logs: str, model_priority: list[str] | None = None) -> s
             reason = _describe_llm_error(e)
             logger.warning(f"Rapport : modèle {model_name} en échec — {reason}")
             errors.append(f"- **{model_name}** : {reason}")
+            if _stop_cascade(e, "Rapport", models_to_try[len(errors):]):
+                interrompu = True
+                break
 
     details = "\n".join(errors) or "aucun modèle configuré dans model_priority."
-    return f"⚠️ Rapport indisponible — tous les modèles LLM ont échoué :\n{details}"
+    return f"⚠️ Rapport indisponible — {_entete_echec(errors, interrompu)} :\n{details}"
 
 
 def save_raw_articles(raw_articles: list[dict]) -> list[dict]:

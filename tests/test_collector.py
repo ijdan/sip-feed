@@ -344,3 +344,109 @@ def test_generate_run_report_rapporte_la_cause_reelle(monkeypatch):
     assert "hors quota" not in rapport
     assert "modele-x" in rapport
     assert "404" in rapport
+
+
+# ─── Blocage au niveau du compte (facturation) ────────────────────────────────
+# Google renvoie 429 aussi bien pour un débit dépassé que pour un solde prépayé
+# épuisé. Les deux ne se traitent pas pareil : le second bloque tous les modèles.
+
+_ERREUR_FACTURATION = (
+    "429 Your prepayment credits are depleted. Please go to AI Studio at "
+    "https://ai.studio/projects to manage your project and billing."
+)
+
+
+def test_429_de_facturation_nest_pas_presente_comme_un_quota(monkeypatch):
+    """Solde prépayé épuisé : le message doit désigner la facturation, pas le quota."""
+    from processors import gemini_processor
+    from google.api_core import exceptions as gexc
+
+    monkeypatch.setattr(gemini_processor.genai, "GenerativeModel",
+                        _fail_with(gexc.ResourceExhausted(_ERREUR_FACTURATION)))
+
+    with pytest.raises(gemini_processor.LLMCascadeError) as excinfo:
+        gemini_processor._call_llm("prompt", ["modele-a"])
+
+    message = str(excinfo.value)
+    assert "FACTURATION BLOQUÉE" in message
+    assert "DÉBIT OU QUOTA DÉPASSÉ" not in message, "à ne pas confondre avec un débit dépassé"
+    assert "ai.studio/projects" in message, "l'action corrective doit rester lisible"
+
+
+def test_429_de_debit_reste_un_quota(monkeypatch):
+    """Un vrai dépassement de débit garde son libellé et n'interrompt pas la cascade."""
+    from processors import gemini_processor
+    from google.api_core import exceptions as gexc
+
+    monkeypatch.setattr(gemini_processor.genai, "GenerativeModel",
+                        _fail_with(gexc.ResourceExhausted("429 Quota exceeded for quota metric 'requests'")))
+
+    with pytest.raises(gemini_processor.LLMCascadeError) as excinfo:
+        gemini_processor._call_llm("prompt", ["modele-a", "modele-b"])
+
+    assert "DÉBIT OU QUOTA DÉPASSÉ" in str(excinfo.value)
+    assert excinfo.value.aborted is False
+    assert len(excinfo.value.failures) == 2, "tous les modèles doivent être essayés"
+
+
+def test_facturation_bloquee_interrompt_la_cascade(monkeypatch):
+    """Inutile de marteler les modèles suivants : le blocage est au niveau du compte."""
+    from processors import gemini_processor
+    from google.api_core import exceptions as gexc
+
+    monkeypatch.setattr(gemini_processor.genai, "GenerativeModel",
+                        _fail_with(gexc.ResourceExhausted(_ERREUR_FACTURATION)))
+
+    with pytest.raises(gemini_processor.LLMCascadeError) as excinfo:
+        gemini_processor._call_llm("prompt", ["modele-a", "modele-b", "modele-c"])
+
+    assert excinfo.value.aborted is True
+    assert [m for m, _ in excinfo.value.failures] == ["modele-a"], "un seul modèle essayé"
+
+
+def test_generate_run_report_interrompt_aussi_la_cascade(monkeypatch):
+    """Le rapport ne doit pas non plus rejouer 5 fois le même échec de facturation."""
+    from unittest.mock import MagicMock
+    from processors import gemini_processor
+    from google.api_core import exceptions as gexc
+
+    appels = []
+
+    def fake_model(model_name, *a, **k):
+        appels.append(model_name)
+        model = MagicMock()
+        model.generate_content = MagicMock(side_effect=gexc.ResourceExhausted(_ERREUR_FACTURATION))
+        return model
+
+    monkeypatch.setattr(gemini_processor.genai, "GenerativeModel", fake_model)
+
+    rapport = gemini_processor.generate_run_report("des logs", ["modele-a", "modele-b", "modele-c"])
+
+    assert appels == ["modele-a"], "cascade non interrompue"
+    assert "FACTURATION BLOQUÉE" in rapport
+
+
+def test_select_relevant_articles_interrompt_aussi_la_cascade(monkeypatch):
+    """Même court-circuit sur l'étape de sélection de la synthèse."""
+    from unittest.mock import MagicMock
+    from processors import gemini_processor
+    from google.api_core import exceptions as gexc
+
+    appels = []
+
+    def fake_model(model_name, *a, **k):
+        appels.append(model_name)
+        model = MagicMock()
+        model.generate_content = MagicMock(side_effect=gexc.ResourceExhausted(_ERREUR_FACTURATION))
+        return model
+
+    monkeypatch.setattr(gemini_processor.genai, "GenerativeModel", fake_model)
+
+    resultat = gemini_processor.select_relevant_articles(
+        [{"id": "a1", "title": "Test", "long_description": "Test."}],
+        "kubernetes",
+        ["modele-a", "modele-b", "modele-c"],
+    )
+
+    assert resultat is None
+    assert appels == ["modele-a"], "cascade non interrompue"

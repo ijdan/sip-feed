@@ -83,11 +83,13 @@ NextAuth (`frontend/src/lib/auth.ts`) gère le flow OAuth Google/GitHub côté f
 
 Une exécution = 4 étapes orchestrées dans `run()` :
 1. Lit `settings/global` depuis Firestore (liste de modèles Gemini priorisée, `llm_enabled`, `thinking_enabled`, `gmail_lookback_days`, `retention_days`, `interest`).
-2. Scrape toutes les sources actives — Gmail traité **en premier** pour que les newsletters l'emportent sur l'attribution d'URL. Plafonné à `MAX_ARTICLES_PER_RUN = 20`. Dédup contre Firestore par `article_url`.
+2. Scrape toutes les sources actives — Gmail traité **en premier** pour que les newsletters l'emportent sur l'attribution d'URL. Dédup contre Firestore par `article_url`.
 3. Enrichit via Gemini en un seul appel batch bilingue (`enrich_articles_batch` dans `processors/gemini_processor.py`) → titres/descriptions/keywords FR + EN simultanés. Cascade de fallback sur la `model_priority`. Si tous les modèles échouent : `save_raw_articles` écrit les articles bruts.
-4. Si `settings.interest` est renseigné : `generate_synthesis` produit une synthèse markdown ciblée sur les 100 derniers articles, écrite dans `syntheses/{date}`. Toujours en fin de run : `generate_run_report` produit un rapport LLM des logs (via un `_MemoryHandler` qui capture tous les logs en mémoire), écrit dans `reports/latest`.
+4. Purge de rétention (`apply_retention`, si `retention_days > 0`). Puis, si `settings.interest` est renseigné : `run_synthesis` (`processors/synthesis.py`) pré-sélectionne par LLM les articles pertinents parmi un corpus de 100 max, et écrit la synthèse markdown dans `syntheses/{date}` (ou `syntheses/{date}_{date_end}` pour une plage). Toujours en fin de run : `generate_run_report` produit un rapport LLM des logs (via un `_MemoryHandler` qui capture tous les logs en mémoire), écrit dans `reports/latest`.
 
-`COLLECTOR_SOURCE_ID` permet de cibler une source unique — utilisé par le bouton "collecter cette source" de l'admin.
+Variables d'env qui modifient le run (injectées par `admin.py`) :
+- `COLLECTOR_SOURCE_ID` — cible une source unique (bouton "collecter cette source").
+- `COLLECTOR_SYNTHESIS_ONLY` — aucune collecte, régénère seulement la synthèse ; `COLLECTOR_SYNTHESIS_DATE` / `COLLECTOR_SYNTHESIS_DATE_END` pour une date ou une plage (bouton « Générer maintenant »).
 
 ### Déclenchement du collector depuis le backend (`admin.py`)
 
@@ -115,6 +117,8 @@ Trois workflows GitHub Actions s'enchaînent quand tu pousses un `.feature` Gher
 2. **`implement-feature.yml`** (Opus 4.7, max 15 turns) — implémente le code applicatif dans `backend/app/features/`, boucle test → fix → test jusqu'au vert ou épuisement du budget de turns, puis ouvre une **PR draft** vers `main`.
 3. **`ci-cd.yml`** (existant) — sur merge de la PR vers `main`, build + déploie sur Cloud Run.
 
+La logique des workflows 1 et 2 vit dans `scripts/generate_acceptance_tests.py` et `scripts/implement_feature.py` (SDK Anthropic, modèle en constante `MODEL`). `guard-bot-loops.yml` est le garde-fou anti-boucle bot. Autres workflows hors pipeline : `e2e.yml`, `security-scan.yml` (scanner maison `agents/security_scanner.py`, échoue sur une vulnérabilité CRITIQUE), `refresh-summaries.yml` (manuel : reformule par IA les articles bruts d'un jour donné, avec `dry_run`). Détails dans `.github/workflows/README.md`.
+
 ### Règles strictes pour le bot Claude dans la CI
 
 - **Tout commit du bot a comme auteur `claude-bot@users.noreply.github.com`**. Les workflows filtrent sur cet email pour éviter les boucles bot → bot. On **n'utilise pas** `[skip ci]` dans le message car un squash merge en hériterait et bloquerait `ci-cd.yml` à tort.
@@ -138,8 +142,7 @@ Trois workflows GitHub Actions s'enchaînent quand tu pousses un `.feature` Gher
 - Pas de linter Python configuré — pas de `ruff`/`flake8`/`black` à invoquer.
 - Catégories d'articles canoniques : `["IA", "DevOps", "Cloud", "Sécurité", "Dev", "IT", "Autre"]`. Définies en doublon dans `backend/app/routers/articles.py`, `backend/app/models/article.py`, et `collector/processors/gemini_processor.py` — modifier les trois ensemble.
 - `DEFAULT_MODEL_PRIORITY` (modèles Gemini, **le moins cher en tête parmi ceux qui tiennent la qualité** ; les Gemma sont en repli) existe en **deux exemplaires seulement** : `collector/processors/gemini_processor.py` et `backend/app/services/article_summarizer.py` — modifier les deux ensemble, avec `MODEL_PRIORITY_VERSION` (`tests/test_collector.py` vérifie que liste et version ne divergent pas). Tous les autres modules importent : `collector/main.py`, `collector/analyze_logs.py`, `backend/app/routers/admin.py`.
-- **Tout lecteur de `model_priority` doit passer par `merge_model_priority()`**, sinon il utilise l'ordre brut de Firestore et diverge de la page admin tant que celle-ci n'a pas été ouverte (c'est elle qui persiste la migration). Trois chemins lisent ce réglage : la page admin, la collecte/synthèse, et le bouton « Régénérer le résumé IA ».
 - **L'ordre choisi dans la page admin est appliqué littéralement**, à chaque appel LLM, sans aucune réécriture : pas de tri, pas de purge des modèles inconnus, pas d'insertion automatique des nouveaux. `resolve_model_priority()` porte cette règle et n'a qu'un seul comportement par défaut : amorcer un projet neuf sur `DEFAULT_MODEL_PRIORITY` quand `settings/global.model_priority` est vide ou absent. Modifier la constante n'a donc **aucun effet** sur un projet existant — c'est voulu, l'administrateur est seul maître de l'ordre. Un modèle hors catalogue est signalé dans les logs mais tout de même sollicité.
-- Trois chemins lisent ce réglage et doivent tous passer par `resolve_model_priority()` : la page admin (`GET /admin/settings`, en lecture seule — seul le PUT écrit), la collecte/synthèse (`collector/main.py`), et le bouton « Régénérer le résumé IA » (`article_summarizer.get_model_priority`).
+- Tous les chemins qui lisent ce réglage doivent passer par `resolve_model_priority()` : la page admin (`GET /admin/settings`, en lecture seule — seul le PUT écrit), la collecte/synthèse (`collector/main.py`), le bouton « Régénérer le résumé IA » (`article_summarizer.get_model_priority`), ainsi que `collector/analyze_logs.py`.
 - Secrets en prod via Secret Manager (montés en env vars par `--set-secrets` dans `.github/workflows/ci-cd.yml`). En local : `backend/.env` et `collector/.env`, jamais commités (`.gitignore` les bloque).
 - `gmail_token.json` est généré une seule fois via `collector/auth_gmail.py` et monté en env var `GMAIL_TOKEN` en prod.

@@ -77,6 +77,16 @@ def articles_stats():
     return {"total": total, "by_category": counts}
 
 
+def _seuil_retention(retention_days: int) -> str:
+    """Date limite de la fenêtre, au format écrit par le collector (ISO UTC naïf).
+
+    Les chaînes ISO se comparent dans l'ordre chronologique, y compris celles
+    suffixées « +00:00 » ou « Z » : Firestore peut donc filtrer directement.
+    """
+    seuil = datetime.now(tz=timezone.utc) - timedelta(days=retention_days)
+    return seuil.replace(tzinfo=None).isoformat()
+
+
 @router.get("/")
 def list_articles(
     category: str | None = Query(None),
@@ -85,32 +95,52 @@ def list_articles(
 ):
     db = get_db()
 
-    # Récupération par IDs explicites — sans filtre de rétention (favoris anciens)
+    # Récupération par IDs explicites — sans filtre de rétention (favoris anciens).
+    # get_all : une seule requête Firestore au lieu d'un aller-retour par article.
     if ids:
-        id_list = [i.strip() for i in ids.split(",") if i.strip()][:200]
-        items = []
-        for article_id in id_list:
-            doc = db.collection("articles").document(article_id).get()
-            if doc.exists:
-                data = doc.to_dict()
-                items.append(Article(**{**data, "id": doc.id}))
+        id_list = list(dict.fromkeys(i.strip() for i in ids.split(",") if i.strip()))[:200]
+        refs = [db.collection("articles").document(article_id) for article_id in id_list]
+        items = [
+            Article(**{**doc.to_dict(), "id": doc.id})
+            for doc in db.get_all(refs)
+            if doc.exists
+        ]
         items.sort(key=lambda a: a.published_at or "", reverse=True)
         return ArticleList(items=items)
 
-    query = db.collection("articles").order_by("published_at", direction="DESCENDING")
-
-    if category:
-        query = query.where("category", "==", category)
-    if source_id:
-        query = query.where("source_id", "==", source_id)
-
     retention_days = _get_retention_days()
-    items = []
-    for doc in query.stream():
-        data = doc.to_dict()
-        if retention_days > 0 and not _est_dans_fenetre(data, retention_days):
-            continue
-        items.append(Article(**{**data, "id": doc.id}))
+
+    if retention_days > 0:
+        # La fenêtre est filtrée par Firestore : seuls ses articles sont lus,
+        # quel que soit le nombre d'articles conservés en base (aucune
+        # suppression, cf. features/filter-articles-by-days.feature).
+        # Une seule inégalité, sans order_by ni égalité combinés : l'index
+        # automatique sur collected_at suffit, pas d'index composite à créer.
+        # Tri et filtres catégorie/source se font ensuite sur la fenêtre.
+        docs = db.collection("articles").where(
+            "collected_at", ">=", _seuil_retention(retention_days)
+        ).stream()
+        items = []
+        for doc in docs:
+            data = doc.to_dict()
+            if category and data.get("category") != category:
+                continue
+            if source_id and data.get("source_id") != source_id:
+                continue
+            if not _est_dans_fenetre(data, retention_days):
+                continue
+            items.append(Article(**{**data, "id": doc.id}))
+        # Même ordre que order_by("published_at", DESCENDING) : Firestore
+        # départage les ex-aequo par identifiant, dans le même sens.
+        items.sort(key=lambda a: (a.published_at or "", a.id), reverse=True)
+    else:
+        # Rétention illimitée : tous les articles, du plus récent au plus ancien.
+        query = db.collection("articles").order_by("published_at", direction="DESCENDING")
+        if category:
+            query = query.where("category", "==", category)
+        if source_id:
+            query = query.where("source_id", "==", source_id)
+        items = [Article(**{**doc.to_dict(), "id": doc.id}) for doc in query.stream()]
 
     return ArticleList(items=items)
 

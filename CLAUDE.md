@@ -110,6 +110,10 @@ La page d'accueil est un **Server Component** : `page.tsx` appelle le backend vi
 
 `Article` (`backend/app/models/article.py`) garde des champs `title`, `short_description`, `long_description` **sans suffixe** pour rétrocompat. Le collector remplit toujours les deux (`title_fr` + `title`). Le frontend bascule entre FR/EN par état local (`lang` dans `page.tsx`), avec valeur initiale lue depuis `user_settings/{email}.default_lang`.
 
+### Lecture des articles et rétention (`backend/app/routers/articles.py`)
+
+Les articles ne sont **jamais supprimés** (`apply_retention` est un no-op) : la collection grossit à chaque collecte (~12 700 documents fin 2026 pour ~260 dans une fenêtre de 7 jours). `GET /articles/` doit donc filtrer la fenêtre **dans la requête Firestore** (`collected_at >= seuil`, chaîne ISO comparable) et jamais parcourir toute la collection : un parcours complet coûtait ~10 s par affichage en prod, et chaque clic sur un filtre du feed rappelle cet endpoint. La requête n'a qu'une inégalité, sans `order_by` ni égalité combinés (pas d'index composite à créer) : tri et filtres catégorie / source se font en Python sur la fenêtre. `?ids=` utilise `get_all` (un seul aller-retour).
+
 ### Stats API (middleware non-bloquant)
 
 `StatsMiddleware` (`backend/app/middleware.py`) intercepte uniquement les `GET /articles/*`, extrait l'identifiant (email du JWT ou IP), et incrémente `api_stats/{YYYY-MM-DD}.{identifier}` via `asyncio.create_task` (fire-and-forget). Les erreurs réseau sont silencieusement ignorées — les stats ne doivent jamais faire échouer une requête.

@@ -199,6 +199,10 @@ def _appeler_articles(contexte, params=None):
     fake_db.set_docs("articles", {k: _to_doc(k, v) for k, v in contexte["articles_firestore"].items()})
     fake_db.set_docs("settings", {"global": {"retention_days": contexte["retention_days"] or 0}})
 
+    # retention_days est mis en cache 5 min : sans remise à zéro, un scénario
+    # hériterait de la valeur du scénario précédent.
+    articles_module._retention_cache["expires"] = 0.0
+
     test_app = FastAPI()
     test_app.include_router(articles_module.router, prefix="/articles")
 

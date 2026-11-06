@@ -97,6 +97,15 @@ Deux chemins selon `APP_ENV` :
 - **local** : `_trigger_local` lance `python main.py` en sous-processus avec le venv du collector, vers l'émulateur.
 - **prod** : `_trigger_job` appelle l'API Cloud Run Jobs (`POST .../jobs/collector:run`) avec un token OAuth2 récupéré via les credentials par défaut. Les `containerOverrides.env` injectent `COLLECTOR_SOURCE_ID` quand on cible une source.
 
+### Feed composé côté serveur de présentation (`frontend/src/app/(feed)/`)
+
+La page d'accueil est un **Server Component** : `page.tsx` appelle le backend via `lib/server-api.ts` (`import "server-only"`, URL `BACKEND_URL` lue à l'exécution, repli sur `NEXT_PUBLIC_API_URL`), puis filtre et pagine avec les fonctions pures de `lib/feed.ts`. `components/feed/FeedClient.tsx` ne garde que l'interactivité.
+- **L'état du feed vit dans l'URL** (`?cat=IA&exclus=…&q=…&n=40&lang=en&cols=2&favoris=1&lecture=1&masquer_lus=0`). Un paramètre absent prend le défaut de l'utilisateur : settings backend s'il est connecté, sinon le cookie `sip-feed-vue` (miroir des settings écrit par `useSettings`), sinon `DEFAULT_SETTINGS`. Seules les valeurs différentes du défaut sont écrites dans l'URL (`feedSearch`).
+- `src/middleware.ts` redirige `/` sans paramètre vers la dernière vue (cookie `sip-feed-derniere-vue`), pour mémoriser catégorie / sources / colonnes.
+- Les préférences d'articles (favoris, corbeille, lus) d'un utilisateur connecté sont appliquées par le serveur et passées en état initial à `usePreferences`. Celles d'un **anonyme** ne vivent que dans son localStorage : le serveur lui envoie la liste complète et `FeedClient` filtre. Corbeille et favoris anonymes sont chargés par la Server Action `chargerArticlesParIds` (`app/actions.ts`).
+- `server-api.ts` relaie `X-Forwarded-For` pour les anonymes et le JWT pour les connectés : sans ça, `StatsMiddleware` compterait tout sous l'IP du frontend. Les appels sont en `cache: "no-store"` pour la même raison.
+- Les autres pages (admin, settings, profil) sont encore 100 % client et appellent le backend depuis le navigateur.
+
 ### Articles bilingues — compatibilité
 
 `Article` (`backend/app/models/article.py`) garde des champs `title`, `short_description`, `long_description` **sans suffixe** pour rétrocompat. Le collector remplit toujours les deux (`title_fr` + `title`). Le frontend bascule entre FR/EN par état local (`lang` dans `page.tsx`), avec valeur initiale lue depuis `user_settings/{email}.default_lang`.

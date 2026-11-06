@@ -2,27 +2,12 @@
 import { useState, useEffect, useCallback } from "react";
 import { useSession } from "next-auth/react";
 
-export interface UserSettings {
-  theme: "light" | "dark";
-  columns: 1 | 2 | 3;
-  font_size: "sm" | "md" | "lg";
-  excluded_categories: string[];
-  excluded_sources: string[];
-  hide_read: boolean;
-  default_lang: "fr" | "en";
-  articles_per_page: 10 | 20 | 50 | 100;
-}
+import { DEFAULT_SETTINGS, type UserSettings } from "@/lib/settings-defaults";
+import { writeFeedCookie } from "@/lib/feed-cookie";
 
-const DEFAULTS: UserSettings = {
-  theme: "light",
-  columns: 1,
-  font_size: "md",
-  excluded_categories: [],
-  excluded_sources: [],
-  hide_read: false,
-  default_lang: "fr",
-  articles_per_page: 20,
-};
+export type { UserSettings };
+
+const DEFAULTS = DEFAULT_SETTINGS;
 
 const API = process.env.NEXT_PUBLIC_API_URL;
 
@@ -51,7 +36,19 @@ function applyToDOM(s: UserSettings) {
   document.documentElement.classList.add(`font-size-${s.font_size}`);
 }
 
+/** Miroir, dans un cookie, des réglages utiles au rendu serveur du feed. */
+function saveCookie(s: UserSettings) {
+  writeFeedCookie({
+    columns: s.columns,
+    excluded_sources: s.excluded_sources,
+    hide_read: s.hide_read,
+    default_lang: s.default_lang,
+    articles_per_page: s.articles_per_page,
+  });
+}
+
 function saveLocal(s: UserSettings) {
+  saveCookie(s);
   localStorage.setItem("user-settings", JSON.stringify(s));
   localStorage.setItem("theme", s.theme);
   localStorage.setItem("feed-columns", String(s.columns));
@@ -94,6 +91,7 @@ export function useSettings() {
   useEffect(() => {
     // Applique les settings locaux au DOM dès le mount (déjà dans le state via useState)
     applyToDOM(settings);
+    saveCookie(settings);
 
     if (token) {
       fetchSettings(token).then((remote) => {

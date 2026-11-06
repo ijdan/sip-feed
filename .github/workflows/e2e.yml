@@ -34,6 +34,7 @@ jobs:
       GEMINI_API_KEY: dummy-gemini-key
       # Frontend (NEXT_PUBLIC_* injected at build/run time)
       NEXT_PUBLIC_API_URL: http://localhost:8000
+      BACKEND_URL: http://localhost:8000          # appels serveur (Server Components)
       NEXTAUTH_URL: http://localhost:3000
       NEXTAUTH_SECRET: dummy-nextauth-secret-for-ci
       GITHUB_CLIENT_ID: dummy-github-client-id

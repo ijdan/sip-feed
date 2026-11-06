@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useSession } from "next-auth/react";
 
-interface RemotePrefs {
+export interface RemotePrefs {
   favorites: string[];
   reading_list: string[];
   read_articles: string[];
@@ -50,14 +50,19 @@ function saveLocal(
   localStorage.setItem("feed-dismissed", JSON.stringify(dismissed));
 }
 
-export function usePreferences() {
+/**
+ * @param initial préférences déjà lues par le serveur de présentation. Elles
+ *   servent d'état initial (rendu serveur et hydratation identiques) et
+ *   remplacent l'appel `GET /users/me/preferences` au chargement.
+ */
+export function usePreferences(initial?: RemotePrefs | null) {
   const { data: session } = useSession();
   const token = ((session as unknown) as import("@/lib/types").AppSession)?.accessToken as string | undefined;
 
-  const [favorites, setFavorites] = useState<Set<string>>(new Set());
-  const [readingList, setReadingList] = useState<Set<string>>(new Set());
-  const [readArticles, setReadArticles] = useState<Set<string>>(new Set());
-  const [dismissedList, setDismissedList] = useState<string[]>([]);
+  const [favorites, setFavorites] = useState<Set<string>>(() => new Set(initial?.favorites ?? []));
+  const [readingList, setReadingList] = useState<Set<string>>(() => new Set(initial?.reading_list ?? []));
+  const [readArticles, setReadArticles] = useState<Set<string>>(() => new Set(initial?.read_articles ?? []));
+  const [dismissedList, setDismissedList] = useState<string[]>(() => initial?.dismissed ?? []);
   const [loaded, setLoaded] = useState(false);
 
   // Ref pour avoir toujours les valeurs à jour dans les callbacks
@@ -75,29 +80,32 @@ export function usePreferences() {
     }
     setLoaded(true);
 
-    if (token) {
-      fetchRemote(token).then((remote) => {
-        if (!remote) return;
-        // Merge : union des deux sources (union = on garde tout)
-        const merged = {
-          favorites: new Set<string>([...Array.from(local?.favorites ?? new Set<string>()), ...remote.favorites]),
-          readingList: new Set<string>([...Array.from(local?.readingList ?? new Set<string>()), ...remote.reading_list]),
-          readArticles: new Set<string>([...Array.from(local?.readArticles ?? new Set<string>()), ...remote.read_articles]),
-          dismissed: Array.from(new Set([...(local?.dismissed ?? []), ...remote.dismissed])),
-        };
-        setFavorites(merged.favorites);
-        setReadingList(merged.readingList);
-        setReadArticles(merged.readArticles);
-        setDismissedList(merged.dismissed);
-        saveLocal(merged.favorites, merged.readingList, merged.readArticles, merged.dismissed);
-        // Sync le merge vers Firestore
-        pushRemote(token, {
-          favorites: Array.from(merged.favorites),
-          reading_list: Array.from(merged.readingList),
-          read_articles: Array.from(merged.readArticles),
-          dismissed: merged.dismissed,
-        });
+    const fusionner = (remote: RemotePrefs) => {
+      // Merge : union des deux sources (union = on garde tout)
+      const merged = {
+        favorites: new Set<string>([...Array.from(local?.favorites ?? new Set<string>()), ...remote.favorites]),
+        readingList: new Set<string>([...Array.from(local?.readingList ?? new Set<string>()), ...remote.reading_list]),
+        readArticles: new Set<string>([...Array.from(local?.readArticles ?? new Set<string>()), ...remote.read_articles]),
+        dismissed: Array.from(new Set([...(local?.dismissed ?? []), ...remote.dismissed])),
+      };
+      setFavorites(merged.favorites);
+      setReadingList(merged.readingList);
+      setReadArticles(merged.readArticles);
+      setDismissedList(merged.dismissed);
+      saveLocal(merged.favorites, merged.readingList, merged.readArticles, merged.dismissed);
+      // Sync le merge vers Firestore
+      if (token) pushRemote(token, {
+        favorites: Array.from(merged.favorites),
+        reading_list: Array.from(merged.readingList),
+        read_articles: Array.from(merged.readArticles),
+        dismissed: merged.dismissed,
       });
+    };
+
+    if (initial) {
+      fusionner(initial);
+    } else if (token) {
+      fetchRemote(token).then((remote) => { if (remote) fusionner(remote); });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
